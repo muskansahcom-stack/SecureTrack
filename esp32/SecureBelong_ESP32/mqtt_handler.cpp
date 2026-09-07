@@ -8,6 +8,8 @@ MQTTManager::MQTTManager(SensorManager& sensors, GPSHandler& gps, BuzzerControll
     gps(gps),
     buzzer(buzzer),
     systemArmed(false),
+    areaSecurityEnabled(false),
+    belongingSecurityEnabled(false),
     silentMode(DEFAULT_SILENT_MODE),
     lastReconnectAttempt(0),
     lastTelemetryTime(0),
@@ -23,7 +25,7 @@ void MQTTManager::begin() {
 
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setCallback(MQTTManager::mqttCallback);
-  mqttClient.setBufferSize(1024); // Large buffer for JSON payloads
+  mqttClient.setBufferSize(1024);
 }
 
 void MQTTManager::connectWiFi() {
@@ -69,7 +71,6 @@ void MQTTManager::connectMQTT() {
     lastReconnectAttempt = now;
     Serial.printf("[MQTT] Attempting connection to broker %s:%d...\n", MQTT_SERVER, MQTT_PORT);
 
-    // Last Will & Testament to report offline when connection drops unexpectedly
     StaticJsonDocument<128> lwtDoc;
     lwtDoc["is_online"] = 0;
     lwtDoc["status"] = "OFFLINE";
@@ -89,11 +90,9 @@ void MQTTManager::connectMQTT() {
       Serial.println("[MQTT] Broker connected successfully!");
       digitalWrite(PIN_STATUS_LED, HIGH);
 
-      // Subscribe to command topic
       mqttClient.subscribe(TOPIC_COMMAND, 1);
       Serial.printf("[MQTT] Subscribed to topic: %s\n", TOPIC_COMMAND);
 
-      // Publish Online Status
       sendStatus(systemArmed, WiFi.localIP().toString());
     } else {
       Serial.printf("[MQTT] Connection failed, rc=%d. Retrying in 5 seconds...\n", mqttClient.state());
@@ -150,14 +149,14 @@ void MQTTManager::handleCommand(const String& command, JsonObject& params) {
     systemArmed = true;
     buzzer.triggerAlarm(ALARM_CHIRP_ARM);
     sendStatus(systemArmed, WiFi.localIP().toString());
-    sendAck("AREA_SECURITY_ENABLED", true, "Area Security armed (PIR active)");
+    sendAck("AREA_SECURITY_ON", true, "Area Security armed (PIR active)");
     Serial.println("[Security Mode] -> AREA SECURITY ACTIVE (PIR)");
   } else if (command == "AREA_SECURITY_OFF") {
     areaSecurityEnabled = false;
     systemArmed = belongingSecurityEnabled;
     buzzer.triggerAlarm(ALARM_CHIRP_DISARM);
     sendStatus(systemArmed, WiFi.localIP().toString());
-    sendAck("AREA_SECURITY_DISABLED", true, "Area Security disarmed");
+    sendAck("AREA_SECURITY_OFF", true, "Area Security disarmed");
     Serial.println("[Security Mode] -> AREA SECURITY DISABLED");
   }
 
@@ -167,18 +166,49 @@ void MQTTManager::handleCommand(const String& command, JsonObject& params) {
     systemArmed = true;
     buzzer.triggerAlarm(ALARM_CHIRP_ARM);
     sendStatus(systemArmed, WiFi.localIP().toString());
-    sendAck("BELONGING_SECURITY_ENABLED", true, "Personal Belonging Security armed (MPU6050 active)");
+    sendAck("BELONGING_SECURITY_ON", true, "Personal Belonging Security armed (MPU6050 active)");
     Serial.println("[Security Mode] -> PERSONAL BELONGING ACTIVE (MPU6050)");
   } else if (command == "BELONGING_SECURITY_OFF") {
     belongingSecurityEnabled = false;
     systemArmed = areaSecurityEnabled;
     buzzer.triggerAlarm(ALARM_CHIRP_DISARM);
     sendStatus(systemArmed, WiFi.localIP().toString());
-    sendAck("BELONGING_SECURITY_DISABLED", true, "Personal Belonging Security disarmed");
+    sendAck("BELONGING_SECURITY_OFF", true, "Personal Belonging Security disarmed");
     Serial.println("[Security Mode] -> PERSONAL BELONGING DISABLED");
   }
 
-  // 3. MASTER ARM / DISARM
+  // 3. 4 PRESET SECURITY MODES
+  else if (command == "SET_MODE_HOME") {
+    areaSecurityEnabled = true;
+    belongingSecurityEnabled = false;
+    systemArmed = true;
+    buzzer.triggerAlarm(ALARM_CHIRP_ARM);
+    sendStatus(systemArmed, WiFi.localIP().toString());
+    sendAck("SET_MODE_HOME", true, "Mode: HOME (Area ON, Belonging OFF)");
+  } else if (command == "SET_MODE_AWAY") {
+    areaSecurityEnabled = true;
+    belongingSecurityEnabled = true;
+    systemArmed = true;
+    buzzer.triggerAlarm(ALARM_CHIRP_ARM);
+    sendStatus(systemArmed, WiFi.localIP().toString());
+    sendAck("SET_MODE_AWAY", true, "Mode: AWAY (Area ON, Belonging ON)");
+  } else if (command == "SET_MODE_TRAVEL") {
+    areaSecurityEnabled = false;
+    belongingSecurityEnabled = true;
+    systemArmed = true;
+    buzzer.triggerAlarm(ALARM_CHIRP_ARM);
+    sendStatus(systemArmed, WiFi.localIP().toString());
+    sendAck("SET_MODE_TRAVEL", true, "Mode: TRAVEL (Belonging ON, GPS ON)");
+  } else if (command == "SET_MODE_EMERGENCY") {
+    areaSecurityEnabled = true;
+    belongingSecurityEnabled = true;
+    systemArmed = true;
+    buzzer.triggerAlarm(ALARM_CONTINUOUS);
+    sendStatus(systemArmed, WiFi.localIP().toString());
+    sendAck("SET_MODE_EMERGENCY", true, "Mode: EMERGENCY (Maximum Alarm & GPS Active)");
+  }
+
+  // 4. MASTER ARM / DISARM
   else if (command == "ARM") {
     areaSecurityEnabled = true;
     belongingSecurityEnabled = true;
@@ -198,7 +228,7 @@ void MQTTManager::handleCommand(const String& command, JsonObject& params) {
     Serial.println("[Command] -> MASTER SYSTEM DISARMED");
   }
 
-  // 4. PHYSICAL BUZZER CONTROLS
+  // 5. PHYSICAL BUZZER CONTROLS
   else if (command == "BUZZER_ON") {
     buzzer.triggerAlarm(ALARM_CONTINUOUS);
     sendAck("BUZZER_ON", true, "Buzzer siren activated");
@@ -209,8 +239,12 @@ void MQTTManager::handleCommand(const String& command, JsonObject& params) {
     Serial.println("[Command] -> BUZZER OFF");
   }
 
-  // 5. SETTINGS & DIAGNOSTICS
-  else if (command == "SET_SILENT_MODE") {
+  // 6. GPS & SETTINGS
+  else if (command == "REQUEST_GPS") {
+    GPSData currentGps = gps.getData();
+    sendAck("REQUEST_GPS", true, currentGps.is_valid ? "GPS Locked" : "GPS Searching");
+    Serial.println("[Command] -> GPS UPDATE REQUESTED");
+  } else if (command == "SET_SILENT_MODE") {
     if (params.containsKey("silent_mode")) {
       silentMode = (params["silent_mode"].as<int>() == 1);
     } else {

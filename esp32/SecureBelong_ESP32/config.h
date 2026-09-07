@@ -7,27 +7,27 @@
 // 1. DEVICE IDENTIFICATION
 // ==========================================
 #define DEVICE_ID           "ESP32-SECURITY-001"
-#define FIRMWARE_VERSION    "v1.0.0"
+#define FIRMWARE_VERSION    "v1.0.0-PRO"
 
 // ==========================================
 // 2. WI-FI CONFIGURATION (Dual Network Failover)
-// Primary (Home/Office) & Secondary (Phone Personal Hotspot)
+// Primary (Home/Lab Wi-Fi) & Secondary (Phone Personal Hotspot)
 // ==========================================
-#define WIFI_SSID           "Your_WiFi_SSID"
-#define WIFI_PASSWORD       "Your_WiFi_Password"
+#define WIFI_SSID           "Your_WiFi_SSID"       // Enter your Wi-Fi or Hotspot Name
+#define WIFI_PASSWORD       "Your_WiFi_Password"   // Enter your Wi-Fi or Hotspot Password
 
-#define WIFI_SSID_BACKUP    "Your_Phone_Hotspot"
+#define WIFI_SSID_BACKUP    "Your_Phone_Hotspot"   // Optional phone hotspot fallback
 #define WIFI_PASSWORD_BACKUP "Hotspot_Password"
 
 // ==========================================
 // 3. MQTT BROKER CONFIGURATION
-// Point to the IP address of the machine running SECUREBELONG backend
+// Machine IP running SECUREBELONG Gateway (:1883)
 // ==========================================
-#define MQTT_SERVER         "192.168.1.100" // Replace with backend host IP
+#define MQTT_SERVER         "10.10.26.64"          // Current Local IP of this machine
 #define MQTT_PORT           1883
-#define MQTT_USER           ""              // Optional if broker requires auth
+#define MQTT_USER           ""                     // Leave empty if no auth
 #define MQTT_PASSWORD       ""
-#define DEFAULT_SILENT_MODE false           // Set true for covert silent tracking
+#define DEFAULT_SILENT_MODE false                  // False = Audible buzzer, True = Covert silent tracking
 
 // MQTT TOPICS
 #define TOPIC_TELEMETRY     "iot/security/" DEVICE_ID "/telemetry"
@@ -41,18 +41,18 @@
 // 4. HARDWARE PIN DEFINITIONS (ESP32 DevKit V1)
 // ==========================================
 // MPU6050 GY-521 (I2C)
-#define PIN_MPU_SDA         21
-#define PIN_MPU_SCL         22
+#define PIN_MPU_SDA         21  // ESP32 GPIO 21 -> MPU6050 SDA
+#define PIN_MPU_SCL         22  // ESP32 GPIO 22 -> MPU6050 SCL
 
 // HC-SR501 PIR Sensor (Digital Input)
-#define PIN_PIR             13
+#define PIN_PIR             13  // ESP32 GPIO 13 -> HC-SR501 OUT
 
 // 5V Active Buzzer (Digital Output)
-#define PIN_BUZZER          23
+#define PIN_BUZZER          23  // ESP32 GPIO 23 -> Buzzer Positive (+)
 
 // NEO-6M GPS (Hardware Serial 2)
-#define PIN_GPS_RX          16  // ESP32 RX2 connected to GPS TX
-#define PIN_GPS_TX          17  // ESP32 TX2 connected to GPS RX
+#define PIN_GPS_RX          16  // ESP32 GPIO 16 (RX2) -> NEO-6M TX
+#define PIN_GPS_TX          17  // ESP32 GPIO 17 (TX2) -> NEO-6M RX
 #define GPS_BAUD_RATE       9600
 
 // Built-in LED for visual status indication
