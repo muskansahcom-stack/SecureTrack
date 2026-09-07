@@ -141,7 +141,6 @@ deviceRouter.put('/:id/settings', (req: Request, res: Response) => {
   const updates = req.body;
   const updated = updateDeviceSettings(id, updates);
 
-  // Forward settings changes to ESP32 over MQTT
   if (updates.movement_threshold !== undefined) {
     publishCommand(id, {
       command: 'SET_THRESHOLD',
@@ -270,7 +269,74 @@ deviceRouter.post('/:id/command', (req: Request, res: Response): any => {
       });
     }
 
-    // 3. PHYSICAL ALARM BUZZER COMMANDS
+    // 3. 4 SECURITY MODES COMMANDS
+    else if (command === 'SET_MODE_HOME') {
+      updateAreaSecurityState(id, true);
+      updateBelongingSecurityState(id, false);
+      updateDeviceSettings(id, { security_mode: 'HOME' });
+      emitDeviceStatus({ device_id: id, is_armed: 1 });
+      logEvent({
+        id: `evt_cmd_${Date.now()}`,
+        device_id: id,
+        user_id: targetUser,
+        security_mode: 'SYSTEM',
+        event_type: 'SECURITY_MODE_HOME',
+        sensor: 'SYSTEM',
+        message: 'Security Mode switched to HOME (Area: ON, Belonging: OFF).',
+        severity: 'INFO',
+        timestamp: new Date().toISOString()
+      });
+    } else if (command === 'SET_MODE_AWAY') {
+      updateAreaSecurityState(id, true);
+      updateBelongingSecurityState(id, true);
+      updateDeviceSettings(id, { security_mode: 'AWAY' });
+      emitDeviceStatus({ device_id: id, is_armed: 1 });
+      logEvent({
+        id: `evt_cmd_${Date.now()}`,
+        device_id: id,
+        user_id: targetUser,
+        security_mode: 'SYSTEM',
+        event_type: 'SECURITY_MODE_AWAY',
+        sensor: 'SYSTEM',
+        message: 'Security Mode switched to AWAY (Area: ON, Belonging: ON).',
+        severity: 'INFO',
+        timestamp: new Date().toISOString()
+      });
+    } else if (command === 'SET_MODE_TRAVEL') {
+      updateAreaSecurityState(id, false);
+      updateBelongingSecurityState(id, true);
+      updateDeviceSettings(id, { security_mode: 'TRAVEL' });
+      emitDeviceStatus({ device_id: id, is_armed: 1 });
+      logEvent({
+        id: `evt_cmd_${Date.now()}`,
+        device_id: id,
+        user_id: targetUser,
+        security_mode: 'SYSTEM',
+        event_type: 'SECURITY_MODE_TRAVEL',
+        sensor: 'GPS',
+        message: 'Security Mode switched to TRAVEL (Belonging: ON, GPS: ON).',
+        severity: 'INFO',
+        timestamp: new Date().toISOString()
+      });
+    } else if (command === 'SET_MODE_EMERGENCY') {
+      updateAreaSecurityState(id, true);
+      updateBelongingSecurityState(id, true);
+      updateDeviceSettings(id, { security_mode: 'EMERGENCY' });
+      emitDeviceStatus({ device_id: id, is_armed: 1 });
+      logEvent({
+        id: `evt_cmd_${Date.now()}`,
+        device_id: id,
+        user_id: targetUser,
+        security_mode: 'SYSTEM',
+        event_type: 'SECURITY_MODE_EMERGENCY',
+        sensor: 'BUZZER',
+        message: 'Security Mode switched to EMERGENCY (Maximum Acoustic Siren & GPS Lock).',
+        severity: 'CRITICAL',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // 4. PHYSICAL ALARM BUZZER COMMANDS
     else if (command === 'BUZZER_OFF') {
       logEvent({
         id: `evt_cmd_${Date.now()}`,
@@ -279,7 +345,7 @@ deviceRouter.post('/:id/command', (req: Request, res: Response): any => {
         security_mode: 'SYSTEM',
         event_type: 'ALARM_STOPPED',
         sensor: 'BUZZER',
-        message: 'Physical alarm stopped by user from mobile dashboard.',
+        message: 'Physical alarm stopped by user from web dashboard.',
         severity: 'INFO',
         timestamp: new Date().toISOString()
       });
@@ -291,13 +357,25 @@ deviceRouter.post('/:id/command', (req: Request, res: Response): any => {
         security_mode: 'SYSTEM',
         event_type: 'ALARM_TRIGGERED',
         sensor: 'BUZZER',
-        message: 'Manual alarm siren sounding via mobile application.',
+        message: 'Manual alarm siren sounding via web application.',
         severity: 'HIGH',
+        timestamp: new Date().toISOString()
+      });
+    } else if (command === 'REQUEST_GPS') {
+      logEvent({
+        id: `evt_cmd_${Date.now()}`,
+        device_id: id,
+        user_id: targetUser,
+        security_mode: 'SYSTEM',
+        event_type: 'REQUEST_GPS',
+        sensor: 'GPS',
+        message: 'GPS location fix requested from NEO-6M module.',
+        severity: 'INFO',
         timestamp: new Date().toISOString()
       });
     }
 
-    // 4. LEGACY MASTER ARM / DISARM
+    // 5. MASTER ARM / DISARM
     else if (command === 'ARM') {
       updateAreaSecurityState(id, true);
       updateBelongingSecurityState(id, true);

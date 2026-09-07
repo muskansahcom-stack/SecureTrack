@@ -23,6 +23,13 @@ alertRouter.post('/:id/ack', (req: Request, res: Response) => {
   return res.json({ success: true, message: 'Alert acknowledged' });
 });
 
+// Resolve alert
+alertRouter.post('/:id/resolve', (req: Request, res: Response) => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  acknowledgeAlert(id);
+  return res.json({ success: true, message: 'Alert marked as resolved' });
+});
+
 // Clear all alerts
 alertRouter.delete('/', (req: Request, res: Response) => {
   const devIdParam = req.query.deviceId;
@@ -33,7 +40,7 @@ alertRouter.delete('/', (req: Request, res: Response) => {
   return res.json({ success: true, message: 'Alerts cleared' });
 });
 
-// Trigger test alert
+// Trigger test alert (Simulation Sandbox)
 alertRouter.post('/trigger-test', (req: Request, res: Response) => {
   const { device_id, user_id, security_mode, alert_type, title, description, severity, latitude, longitude } = req.body;
   const isArea = alert_type === 'INTRUSION' || security_mode === 'AREA';

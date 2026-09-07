@@ -1,6 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Device, DeviceSettings, Telemetry, Alert, EventLog, GPSPoint } from '../types/index.js';
+import {
+  Device,
+  DeviceSettings,
+  Telemetry,
+  Alert,
+  EventLog,
+  GPSPoint,
+  SecurityModeType,
+  CommandAuditItem,
+  SensorHealthStatus,
+} from '../types/index.js';
 import { api, API_BASE_URL } from '../api/client.js';
 
 interface DeviceContextType {
@@ -10,8 +20,8 @@ interface DeviceContextType {
   setDeviceName: (name: string) => void;
   isTestMode: boolean;
   setTestMode: (enabled: boolean) => void;
-  
-  // Real-time state
+
+  // Real-time telemetry & entity state
   device: Device | null;
   settings: DeviceSettings | null;
   telemetry: Telemetry | null;
@@ -20,17 +30,25 @@ interface DeviceContextType {
   activeAlert: Alert | null;
   setActiveAlert: (a: Alert | null) => void;
   routeHistory: GPSPoint[];
-  
-  // Independent mode states
+
+  // Security mode & status
+  currentSecurityMode: SecurityModeType;
+  securityScore: number;
+  sensorHealth: SensorHealthStatus;
   isAreaActive: boolean;
   isBelongingActive: boolean;
 
-  // Connection diagnostics
+  // Connection & Diagnostics
   isSocketConnected: boolean;
   isEsp32Connected: boolean;
   lastHeartbeatAgeSec: number;
   serverLatencyMs: number;
-  
+  latestCommandStatus: CommandAuditItem | null;
+  commandHistory: CommandAuditItem[];
+
+  // Security Mode Presets
+  setSecurityMode: (mode: SecurityModeType) => Promise<void>;
+
   // Independent Security Controls
   turnOnAreaSecurity: () => Promise<void>;
   turnOffAreaSecurity: () => Promise<void>;
@@ -38,15 +56,23 @@ interface DeviceContextType {
   turnOffBelongingSecurity: () => Promise<void>;
   updateCustomNames: (areaName: string, belongingName: string) => Promise<void>;
 
-  // System & Alarm Controls
+  // Hardware Deterrent & Alarm Controls
   armSystem: () => Promise<void>;
   disarmSystem: () => Promise<void>;
   activateBuzzer: () => Promise<void>;
   stopBuzzer: () => Promise<void>;
   toggleSilentMode: () => Promise<void>;
+  requestGPSUpdate: () => Promise<void>;
+
+  // Calibration & Configuration
+  setSensitivityPreset: (preset: 'LOW' | 'MEDIUM' | 'HIGH') => Promise<void>;
   setMovementThreshold: (threshold: number) => Promise<void>;
+  setAlarmDuration: (durationSec: number) => Promise<void>;
   updateSettings: (updates: Partial<DeviceSettings>) => Promise<void>;
+
+  // Alert & Audit Management
   acknowledgeAlert: (alertId: string) => Promise<void>;
+  resolveAlert: (alertId: string) => Promise<void>;
   clearAlerts: () => Promise<void>;
   clearEvents: () => Promise<void>;
   triggerTestAlert: (type: 'MOTION' | 'INTRUSION') => Promise<void>;
@@ -57,30 +83,23 @@ const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
 
 // ============================================================================
 // ULTIMATE WAKE-UP EMERGENCY KLAXON & AIR-RAID ALARM ENGINE
-// Designed specifically with Sleep-Disruption Psychoacoustics:
-// 1. 520 Hz NFPA/ISO Low-Frequency Square Wave (proven to wake deep sleepers)
-// 2. 1400 Hz - 3200 Hz High-Intensity Industrial Air-Raid Klaxon
-// 3. 3.8 kHz Ultra-Piercing Distress Screech (Human Ear Resonance Peak)
-// 4. Staccato Rapid-Pulse Auditory Shock Modulation (prevents brain habituation)
-// 5. 4.5x Hyper-Gain Non-Linear Saturation & Triple-Stage Peak Maximizer
+// Psychoacoustic Sleep-Disruption Synthesis
 // ============================================================================
 class UltraLoudAlarmEngine {
   private ctx: AudioContext | null = null;
   private isSirenRunning: boolean = false;
-  
-  // Oscillators
-  private osc520Hz: OscillatorNode | null = null; // 520Hz Wake-Up Square Wave
-  private oscKlaxon: OscillatorNode | null = null; // High-Intensity Air Raid
-  private oscPiercing: OscillatorNode | null = null; // 3.8kHz Screech
-  private oscSubBass: OscillatorNode | null = null; // 220Hz Low Body
-  private oscHarmonic: OscillatorNode | null = null; // 1800Hz Strobe
 
-  // Modulation & Filters
+  private osc520Hz: OscillatorNode | null = null;
+  private oscKlaxon: OscillatorNode | null = null;
+  private oscPiercing: OscillatorNode | null = null;
+  private oscSubBass: OscillatorNode | null = null;
+  private oscHarmonic: OscillatorNode | null = null;
+
   private lfoFast: OscillatorNode | null = null;
   private lfoFastGain: GainNode | null = null;
   private lfoStutter: OscillatorNode | null = null;
   private lfoStutterGain: GainNode | null = null;
-  
+
   private masterGain: GainNode | null = null;
   private peakFilter1: BiquadFilterNode | null = null;
   private peakFilter2: BiquadFilterNode | null = null;
@@ -99,7 +118,6 @@ class UltraLoudAlarmEngine {
     }
   }
 
-  // Generate hyper-acoustic overdrive saturation curve for extreme decibels
   private makeHyperDriveCurve(amount: number = 35) {
     const k = amount;
     const n_samples = 44100;
@@ -113,7 +131,6 @@ class UltraLoudAlarmEngine {
   }
 
   constructor() {
-    // Auto-unlock Web Audio API on first user interaction anywhere on screen
     if (typeof window !== 'undefined') {
       const unlockAudio = () => {
         this.initContext();
@@ -127,7 +144,6 @@ class UltraLoudAlarmEngine {
     }
   }
 
-  // Start continuous wake-up emergency air-raid siren
   public startLoudSiren() {
     this.initContext();
     if (!this.ctx || this.isSirenRunning) return;
@@ -136,7 +152,6 @@ class UltraLoudAlarmEngine {
       this.isSirenRunning = true;
       const now = this.ctx.currentTime;
 
-      // 1. Triple-Stage Dynamics Compressor / Loudness Maximizer
       this.compressor = this.ctx.createDynamicsCompressor();
       this.compressor.threshold.setValueAtTime(-28, now);
       this.compressor.knee.setValueAtTime(4, now);
@@ -145,8 +160,6 @@ class UltraLoudAlarmEngine {
       this.compressor.release.setValueAtTime(0.05, now);
       this.compressor.connect(this.ctx.destination);
 
-      // 2. Dual Psychoacoustic Peaking Filters
-      // A: +16dB Ear-Canal Resonance Peak (3200 Hz)
       this.peakFilter1 = this.ctx.createBiquadFilter();
       this.peakFilter1.type = 'peaking';
       this.peakFilter1.frequency.setValueAtTime(3200, now);
@@ -154,7 +167,6 @@ class UltraLoudAlarmEngine {
       this.peakFilter1.gain.setValueAtTime(16.0, now);
       this.peakFilter1.connect(this.compressor);
 
-      // B: +10dB Wake-Up Resonance Peak (520 Hz)
       this.peakFilter2 = this.ctx.createBiquadFilter();
       this.peakFilter2.type = 'peaking';
       this.peakFilter2.frequency.setValueAtTime(520, now);
@@ -162,57 +174,47 @@ class UltraLoudAlarmEngine {
       this.peakFilter2.gain.setValueAtTime(10.0, now);
       this.peakFilter2.connect(this.peakFilter1);
 
-      // 3. Hyper-Drive Harmonic WaveShaper (Saturation Maximizer)
       this.waveShaper = this.ctx.createWaveShaper();
       this.waveShaper.curve = this.makeHyperDriveCurve(30);
       this.waveShaper.oversample = '4x';
       this.waveShaper.connect(this.peakFilter2);
 
-      // 4. Boosted Master Gain Node (4.5x extreme amplification)
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.setValueAtTime(4.5, now);
       this.masterGain.connect(this.waveShaper);
 
-      // 5. FIVE-SOUND GENERATOR ARRAY:
-      // A. 520Hz Deep Sleep Wake-Up Square Wave (NFPA 72 Standard)
       this.osc520Hz = this.ctx.createOscillator();
       this.osc520Hz.type = 'square';
       this.osc520Hz.frequency.setValueAtTime(520, now);
 
-      // B. High-Intensity Air Raid Klaxon (1200Hz - 2800Hz sweep)
       this.oscKlaxon = this.ctx.createOscillator();
       this.oscKlaxon.type = 'sawtooth';
       this.oscKlaxon.frequency.setValueAtTime(1800, now);
 
-      // C. 3.8kHz Ultra-Piercing Distress Screech
       this.oscPiercing = this.ctx.createOscillator();
       this.oscPiercing.type = 'sawtooth';
       this.oscPiercing.frequency.setValueAtTime(3800, now);
 
-      // D. Harmonic Hi-Lo Siren (1400Hz - 2200Hz)
       this.oscHarmonic = this.ctx.createOscillator();
       this.oscHarmonic.type = 'square';
       this.oscHarmonic.frequency.setValueAtTime(2200, now);
 
-      // E. Sub-Body Low Tone (260Hz)
       this.oscSubBass = this.ctx.createOscillator();
       this.oscSubBass.type = 'triangle';
       this.oscSubBass.frequency.setValueAtTime(260, now);
 
-      // 6. Fast Warble LFO (5.5 Hz rapid distress sweep)
       this.lfoFast = this.ctx.createOscillator();
       this.lfoFast.type = 'sawtooth';
       this.lfoFast.frequency.setValueAtTime(5.5, now);
 
       this.lfoFastGain = this.ctx.createGain();
-      this.lfoFastGain.gain.setValueAtTime(1000, now); // Sweeps +/- 1000Hz
+      this.lfoFastGain.gain.setValueAtTime(1000, now);
 
       this.lfoFast.connect(this.lfoFastGain);
       this.lfoFastGain.connect(this.oscKlaxon.frequency);
       this.lfoFastGain.connect(this.oscHarmonic.frequency);
       this.lfoFastGain.connect(this.oscPiercing.frequency);
 
-      // 7. Staccato Auditory-Shock Modulation (6 Hz staccato pulse)
       this.lfoStutter = this.ctx.createOscillator();
       this.lfoStutter.type = 'square';
       this.lfoStutter.frequency.setValueAtTime(6.0, now);
@@ -222,14 +224,12 @@ class UltraLoudAlarmEngine {
       this.lfoStutter.connect(this.lfoStutterGain);
       this.lfoStutterGain.connect(this.osc520Hz.frequency);
 
-      // Connect all 5 audio generators to master gain
       this.osc520Hz.connect(this.masterGain);
       this.oscKlaxon.connect(this.masterGain);
       this.oscPiercing.connect(this.masterGain);
       this.oscHarmonic.connect(this.masterGain);
       this.oscSubBass.connect(this.masterGain);
 
-      // Start all sound engines
       this.osc520Hz.start(now);
       this.oscKlaxon.start(now);
       this.oscPiercing.start(now);
@@ -242,7 +242,6 @@ class UltraLoudAlarmEngine {
     }
   }
 
-  // Stop continuous siren immediately
   public stopLoudSiren() {
     if (!this.isSirenRunning || !this.ctx) return;
     try {
@@ -274,7 +273,6 @@ class UltraLoudAlarmEngine {
     }
   }
 
-  // Play maximum volume one-shot tones
   public playTone(type: 'CRITICAL' | 'HIGH' | 'CHIRP') {
     this.initContext();
     if (!this.ctx) return;
@@ -299,7 +297,6 @@ class UltraLoudAlarmEngine {
       gain.connect(filter);
 
       if (type === 'CRITICAL') {
-        // High-volume 2-tone alarm burst
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(2400, now);
         osc.frequency.exponentialRampToValueAtTime(3600, now + 0.15);
@@ -309,7 +306,6 @@ class UltraLoudAlarmEngine {
         osc.start(now);
         osc.stop(now + 0.7);
       } else if (type === 'HIGH') {
-        // High-volume pulse beep
         osc.type = 'square';
         osc.frequency.setValueAtTime(2000, now);
         gain.gain.setValueAtTime(3.0, now);
@@ -317,7 +313,6 @@ class UltraLoudAlarmEngine {
         osc.start(now);
         osc.stop(now + 0.35);
       } else {
-        // Crisp confirmation chirp
         osc.type = 'sine';
         osc.frequency.setValueAtTime(1500, now);
         osc.frequency.exponentialRampToValueAtTime(2600, now + 0.08);
@@ -355,8 +350,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [lastHeartbeatAgeSec, setLastHeartbeatAgeSec] = useState<number>(0);
   const [serverLatencyMs, setServerLatencyMs] = useState<number>(0);
 
+  const [latestCommandStatus, setLatestCommandStatus] = useState<CommandAuditItem | null>(null);
+  const [commandHistory, setCommandHistory] = useState<CommandAuditItem[]>([]);
+
   const socketRef = useRef<Socket | null>(null);
   const lastHeartbeatTimeRef = useRef<number>(Date.now());
+  const lastMpuTimeRef = useRef<number>(Date.now());
+  const lastPirTimeRef = useRef<number>(Date.now());
+  const lastGpsTimeRef = useRef<number>(Date.now());
 
   const setDeviceId = (id: string) => {
     setDeviceIdState(id);
@@ -371,6 +372,21 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const setTestMode = (enabled: boolean) => {
     setIsTestModeState(enabled);
     localStorage.setItem('securebelong_test_mode', enabled ? 'true' : 'false');
+  };
+
+  // Helper to record & update command status audit trail
+  const trackCommand = (cmdName: string, status: 'SENDING' | 'SENT' | 'ACKNOWLEDGED' | 'FAILED', msg?: string) => {
+    const item: CommandAuditItem = {
+      id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      command: cmdName,
+      target_device: deviceId,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      status,
+      response_message: msg,
+    };
+    setLatestCommandStatus(item);
+    setCommandHistory((prev) => [item, ...prev.slice(0, 19)]);
+    return item;
   };
 
   // Fetch initial REST data
@@ -428,13 +444,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      console.log('[Socket.io] Connected to backend');
+      console.log('[Socket.io] Connected to SecureBelong Gateway');
       setIsSocketConnected(true);
       socket.emit('join:device', deviceId);
     });
 
     socket.on('disconnect', () => {
-      console.log('[Socket.io] Disconnected from backend');
+      console.log('[Socket.io] Disconnected from SecureBelong Gateway');
       setIsSocketConnected(false);
     });
 
@@ -442,9 +458,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (data.device_id === deviceId && !isTestMode) {
         setTelemetry(data);
         lastHeartbeatTimeRef.current = Date.now();
+        lastMpuTimeRef.current = Date.now();
+        lastPirTimeRef.current = Date.now();
+        if (data.gps?.valid) {
+          lastGpsTimeRef.current = Date.now();
+        }
         setDevice((prev) => (prev ? { ...prev, is_online: 1, last_seen: data.timestamp } : prev));
 
-        // If ESP32 buzzer is actively screaming, sound the web app high-power siren!
         if (data.buzzer_active && settings?.silent_mode !== 1) {
           alarmAudio.startLoudSiren();
         }
@@ -490,8 +510,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
 
     socket.on('device:command_ack', (ack: any) => {
-      console.log('[Command Ack]', ack);
+      console.log('[Command Ack from ESP32]', ack);
       alarmAudio.playTone('CHIRP');
+      if (latestCommandStatus) {
+        setLatestCommandStatus((prev) => (prev ? { ...prev, status: 'ACKNOWLEDGED' } : null));
+      }
       refreshData();
     });
 
@@ -515,7 +538,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => clearInterval(interval);
   }, []);
 
-  // TEST / SIMULATION MODE GENERATOR (Strictly separated sandbox)
+  // TEST / SIMULATION MODE GENERATOR
   useEffect(() => {
     if (!isTestMode) return;
 
@@ -538,10 +561,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           gyro_z: parseFloat(((Math.random() - 0.5) * 2.0).toFixed(2)),
           magnitude: parseFloat(simMagnitude.toFixed(3)),
           motion_detected: simMagnitude > 0.3,
+          intensity: simMagnitude > 0.6 ? 'HIGH' : simMagnitude > 0.3 ? 'MEDIUM' : 'LOW',
+          movement_status: simMagnitude > 0.6 ? 'HIGH MOVEMENT' : simMagnitude > 0.3 ? 'MOVEMENT' : 'NORMAL',
         },
         pir: {
           motion: false,
           raw_val: 0,
+          detection_count: 3,
+          last_detected: new Date(Date.now() - 300000).toISOString(),
         },
         gps: {
           latitude: 28.613939,
@@ -550,12 +577,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           satellites: 9,
           altitude: 216.5,
           speed: 0.0,
+          last_update: new Date().toISOString(),
         },
         buzzer_active: false,
         system_armed: isArmed,
         free_heap: 182400,
         uptime_sec: 3600,
-        wifi_rssi: -58,
+        wifi_rssi: -54,
       });
 
       setDevice((prev) =>
@@ -570,7 +598,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               is_armed: isArmed ? 1 : 0,
               last_seen: new Date().toISOString(),
               firmware_version: 'v1.0.0-TEST',
-              wifi_rssi: -58,
+              wifi_rssi: -54,
               created_at: new Date().toISOString(),
             }
       );
@@ -582,39 +610,122 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Independent Security Controls
   const turnOnAreaSecurity = async () => {
+    trackCommand('ARM_AREA_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
     if (isTestMode) {
       setSettings((prev) => (prev ? { ...prev, area_security_enabled: 1 } : null));
     }
-    await api.sendCommand(deviceId, 'AREA_SECURITY_ON');
-    await refreshData();
+    try {
+      await api.armAreaSecurity(deviceId);
+      trackCommand('ARM_AREA_SECURITY', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('ARM_AREA_SECURITY', 'FAILED', e.message);
+    }
   };
 
   const turnOffAreaSecurity = async () => {
+    trackCommand('DISARM_AREA_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
     if (isTestMode) {
       setSettings((prev) => (prev ? { ...prev, area_security_enabled: 0 } : null));
     }
-    await api.sendCommand(deviceId, 'AREA_SECURITY_OFF');
-    await refreshData();
+    try {
+      await api.disarmAreaSecurity(deviceId);
+      trackCommand('DISARM_AREA_SECURITY', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('DISARM_AREA_SECURITY', 'FAILED', e.message);
+    }
   };
 
   const turnOnBelongingSecurity = async () => {
+    trackCommand('ARM_PERSONAL_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
     if (isTestMode) {
       setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 1 } : null));
     }
-    await api.sendCommand(deviceId, 'BELONGING_SECURITY_ON');
-    await refreshData();
+    try {
+      await api.armPersonalSecurity(deviceId);
+      trackCommand('ARM_PERSONAL_SECURITY', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('ARM_PERSONAL_SECURITY', 'FAILED', e.message);
+    }
   };
 
   const turnOffBelongingSecurity = async () => {
+    trackCommand('DISARM_PERSONAL_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
     if (isTestMode) {
       setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 0 } : null));
     }
-    await api.sendCommand(deviceId, 'BELONGING_SECURITY_OFF');
-    await refreshData();
+    try {
+      await api.disarmPersonalSecurity(deviceId);
+      trackCommand('DISARM_PERSONAL_SECURITY', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('DISARM_PERSONAL_SECURITY', 'FAILED', e.message);
+    }
+  };
+
+  // 4 Security Modes Engine
+  const setSecurityMode = async (mode: SecurityModeType) => {
+    trackCommand(`SET_MODE_${mode}`, 'SENDING');
+    alarmAudio.playTone('CHIRP');
+
+    let areaOn = 0;
+    let belongingOn = 0;
+    let autoSiren = 1;
+
+    switch (mode) {
+      case 'HOME':
+        areaOn = 1;
+        belongingOn = 0;
+        break;
+      case 'AWAY':
+        areaOn = 1;
+        belongingOn = 1;
+        break;
+      case 'TRAVEL':
+        areaOn = 0;
+        belongingOn = 1;
+        break;
+      case 'EMERGENCY':
+        areaOn = 1;
+        belongingOn = 1;
+        alarmAudio.startLoudSiren();
+        break;
+      default:
+        break;
+    }
+
+    if (isTestMode) {
+      setSettings((prev) =>
+        prev
+          ? {
+              ...prev,
+              security_mode: mode,
+              area_security_enabled: areaOn,
+              belonging_security_enabled: belongingOn,
+            }
+          : null
+      );
+      setDevice((prev) => (prev ? { ...prev, is_armed: areaOn || belongingOn ? 1 : 0 } : null));
+    }
+
+    try {
+      await api.setSecurityMode(deviceId, mode);
+      await api.updateDeviceSettings(deviceId, {
+        security_mode: mode,
+        area_security_enabled: areaOn,
+        belonging_security_enabled: belongingOn,
+      });
+      trackCommand(`SET_MODE_${mode}`, 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand(`SET_MODE_${mode}`, 'FAILED', e.message);
+    }
   };
 
   const updateCustomNames = async (areaName: string, belongingName: string) => {
@@ -625,40 +736,63 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setSettings(res.data);
   };
 
-  // Actions
   const armSystem = async () => {
+    trackCommand('ARM', 'SENDING');
     alarmAudio.playTone('CHIRP');
     if (isTestMode) {
       setDevice((prev) => (prev ? { ...prev, is_armed: 1 } : null));
       setSettings((prev) => (prev ? { ...prev, area_security_enabled: 1, belonging_security_enabled: 1 } : null));
     }
-    await api.sendCommand(deviceId, 'ARM');
-    await refreshData();
+    try {
+      await api.sendCommand(deviceId, 'ARM');
+      trackCommand('ARM', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('ARM', 'FAILED', e.message);
+    }
   };
 
   const disarmSystem = async () => {
+    trackCommand('DISARM', 'SENDING');
     alarmAudio.playTone('CHIRP');
     alarmAudio.stopLoudSiren();
     if (isTestMode) {
       setDevice((prev) => (prev ? { ...prev, is_armed: 0 } : null));
       setSettings((prev) => (prev ? { ...prev, area_security_enabled: 0, belonging_security_enabled: 0 } : null));
     }
-    await api.sendCommand(deviceId, 'DISARM');
-    await refreshData();
+    try {
+      await api.sendCommand(deviceId, 'DISARM');
+      trackCommand('DISARM', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('DISARM', 'FAILED', e.message);
+    }
   };
 
   const activateBuzzer = async () => {
+    trackCommand('BUZZER_ON', 'SENDING');
     alarmAudio.startLoudSiren();
-    await api.sendCommand(deviceId, 'BUZZER_ON');
-    await refreshData();
+    try {
+      await api.turnBuzzerOn(deviceId);
+      trackCommand('BUZZER_ON', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('BUZZER_ON', 'FAILED', e.message);
+    }
   };
 
   const stopBuzzer = async () => {
+    trackCommand('BUZZER_OFF', 'SENDING');
     alarmAudio.stopLoudSiren();
     alarmAudio.playTone('CHIRP');
-    await api.sendCommand(deviceId, 'BUZZER_OFF');
-    setActiveAlert(null);
-    await refreshData();
+    try {
+      await api.turnBuzzerOff(deviceId);
+      setActiveAlert(null);
+      trackCommand('BUZZER_OFF', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('BUZZER_OFF', 'FAILED', e.message);
+    }
   };
 
   const toggleSilentMode = async () => {
@@ -668,13 +802,41 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (newVal === 1) {
       alarmAudio.stopLoudSiren();
     }
+    trackCommand(`SET_SILENT_MODE_${newVal ? 'ON' : 'OFF'}`, 'SENDING');
     const res = await api.updateDeviceSettings(deviceId, { silent_mode: newVal });
     setSettings(res.data);
+    trackCommand(`SET_SILENT_MODE_${newVal ? 'ON' : 'OFF'}`, 'SENT');
+  };
+
+  const requestGPSUpdate = async () => {
+    trackCommand('REQUEST_GPS', 'SENDING');
+    alarmAudio.playTone('CHIRP');
+    try {
+      await api.requestGPS(deviceId);
+      trackCommand('REQUEST_GPS', 'SENT');
+      await refreshData();
+    } catch (e: any) {
+      trackCommand('REQUEST_GPS', 'FAILED', e.message);
+    }
+  };
+
+  const setSensitivityPreset = async (preset: 'LOW' | 'MEDIUM' | 'HIGH') => {
+    let th = 0.30;
+    if (preset === 'LOW') th = 0.55;
+    if (preset === 'MEDIUM') th = 0.30;
+    if (preset === 'HIGH') th = 0.15;
+    await api.updateDeviceSettings(deviceId, { movement_threshold: th, sensitivity_preset: preset });
+    setSettings((prev) => (prev ? { ...prev, movement_threshold: th, sensitivity_preset: preset } : null));
   };
 
   const setMovementThreshold = async (threshold: number) => {
     await api.updateDeviceSettings(deviceId, { movement_threshold: threshold });
     setSettings((prev) => (prev ? { ...prev, movement_threshold: threshold } : null));
+  };
+
+  const setAlarmDuration = async (durationSec: number) => {
+    await api.updateDeviceSettings(deviceId, { alarm_duration_sec: durationSec });
+    setSettings((prev) => (prev ? { ...prev, alarm_duration_sec: durationSec } : null));
   };
 
   const updateSettings = async (updates: Partial<DeviceSettings>) => {
@@ -687,6 +849,17 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     await api.acknowledgeAlert(alertId);
     setAlerts((prev) =>
       prev.map((a) => (a.id === alertId ? { ...a, acknowledged: 1 } : a))
+    );
+    if (activeAlert?.id === alertId) {
+      setActiveAlert(null);
+    }
+  };
+
+  const resolveAlert = async (alertId: string) => {
+    alarmAudio.stopLoudSiren();
+    await api.resolveAlert(alertId);
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, acknowledged: 1, resolved: 1 } : a))
     );
     if (activeAlert?.id === alertId) {
       setActiveAlert(null);
@@ -712,8 +885,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       title: type === 'MOTION' ? '🚨 [TEST] Belonging Movement' : '🚨 [TEST] Area Intrusion',
       description:
         type === 'MOTION'
-          ? 'Simulated personal belonging displacement detected.'
-          : 'Simulated human motion detected in security perimeter.',
+          ? 'Simulated personal belonging displacement detected via MPU6050.'
+          : 'Simulated human perimeter intrusion detected via HC-SR501 PIR.',
       severity: type === 'MOTION' ? 'HIGH' : 'CRITICAL',
     });
     await refreshData();
@@ -722,6 +895,42 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const isEsp32Connected = isTestMode ? true : device?.is_online === 1 && lastHeartbeatAgeSec < 15;
   const isAreaActive = settings?.area_security_enabled === 1 || telemetry?.area_security_enabled === true;
   const isBelongingActive = settings?.belonging_security_enabled === 1 || telemetry?.belonging_security_enabled === true;
+
+  // Determine current active security mode
+  let currentSecurityMode: SecurityModeType = settings?.security_mode || 'CUSTOM';
+  if (isAreaActive && isBelongingActive) {
+    if (telemetry?.buzzer_active) {
+      currentSecurityMode = 'EMERGENCY';
+    } else {
+      currentSecurityMode = 'AWAY';
+    }
+  } else if (isAreaActive && !isBelongingActive) {
+    currentSecurityMode = 'HOME';
+  } else if (!isAreaActive && isBelongingActive) {
+    currentSecurityMode = 'TRAVEL';
+  }
+
+  // Sensor health status calculations & timeout detection
+  const isMpuOk = isTestMode || (isEsp32Connected && (Date.now() - lastMpuTimeRef.current) < 20000);
+  const isPirOk = settings?.pir_enabled !== 0;
+  const isGpsOk = telemetry?.gps?.valid === true;
+
+  // Security Score calculation
+  let calculatedScore = 100;
+  if (!isEsp32Connected && !isTestMode) calculatedScore -= 40;
+  if (!isAreaActive && !isBelongingActive) calculatedScore -= 15;
+  const unackedCritAlerts = alerts.filter((a) => a.acknowledged === 0 && (a.severity === 'CRITICAL' || a.severity === 'HIGH')).length;
+  calculatedScore -= Math.min(30, unackedCritAlerts * 15);
+  if (!isGpsOk) calculatedScore -= 5;
+  if (calculatedScore < 0) calculatedScore = 0;
+
+  const sensorHealth: SensorHealthStatus = {
+    mpu: isMpuOk ? 'OPERATIONAL' : 'TIMEOUT',
+    pir: isPirOk ? (isEsp32Connected ? 'OPERATIONAL' : 'TIMEOUT') : 'DISABLED',
+    gps: isGpsOk ? 'LOCKED' : 'SEARCHING',
+    buzzer: isEsp32Connected ? 'OPERATIONAL' : 'ERROR',
+    overallScore: calculatedScore,
+  };
 
   return (
     <DeviceContext.Provider
@@ -740,12 +949,18 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         activeAlert,
         setActiveAlert,
         routeHistory,
+        currentSecurityMode,
+        securityScore: calculatedScore,
+        sensorHealth,
         isAreaActive,
         isBelongingActive,
         isSocketConnected,
         isEsp32Connected,
         lastHeartbeatAgeSec,
         serverLatencyMs,
+        latestCommandStatus,
+        commandHistory,
+        setSecurityMode,
         turnOnAreaSecurity,
         turnOffAreaSecurity,
         turnOnBelongingSecurity,
@@ -756,9 +971,13 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         activateBuzzer,
         stopBuzzer,
         toggleSilentMode,
+        requestGPSUpdate,
+        setSensitivityPreset,
         setMovementThreshold,
+        setAlarmDuration,
         updateSettings,
         acknowledgeAlert,
+        resolveAlert,
         clearAlerts,
         clearEvents,
         triggerTestAlert,

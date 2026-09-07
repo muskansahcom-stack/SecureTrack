@@ -20,13 +20,17 @@ export interface Device {
   created_at: string;
 }
 
+export type SecurityModeType = 'HOME' | 'AWAY' | 'TRAVEL' | 'EMERGENCY' | 'CUSTOM';
+
 export interface DeviceSettings {
   device_id: string;
-  area_name: string; // e.g. "Hostel Room", "Bedroom", "Office"
+  area_name: string; // e.g. "My Hostel Room", "Bedroom", "Office"
   area_security_enabled: number; // 1 = Active PIR Area Monitoring, 0 = OFF
-  belonging_name: string; // e.g. "Laptop Bag", "Backpack", "Suitcase"
+  belonging_name: string; // e.g. "My Laptop Bag", "Backpack", "Suitcase"
   belonging_security_enabled: number; // 1 = Active MPU6050 Belonging Monitoring, 0 = OFF
+  security_mode?: SecurityModeType;
   movement_threshold: number;
+  sensitivity_preset?: 'LOW' | 'MEDIUM' | 'HIGH';
   pir_enabled: number;
   mpu_enabled: number;
   auto_buzzer: number;
@@ -55,6 +59,8 @@ export interface MPUData {
   gyro_z: number;
   magnitude: number;
   motion_detected: boolean;
+  intensity?: 'LOW' | 'MEDIUM' | 'HIGH';
+  movement_status?: 'NORMAL' | 'MOVEMENT' | 'HIGH MOVEMENT';
 }
 
 export interface GPSData {
@@ -64,6 +70,7 @@ export interface GPSData {
   satellites: number;
   altitude?: number;
   speed?: number;
+  last_update?: string;
 }
 
 export interface Telemetry {
@@ -74,6 +81,8 @@ export interface Telemetry {
   pir: {
     motion: boolean;
     raw_val: number;
+    detection_count?: number;
+    last_detected?: string;
   };
   gps: GPSData;
   buzzer_active: boolean;
@@ -98,6 +107,7 @@ export interface Alert {
   latitude: number | null;
   longitude: number | null;
   acknowledged: number;
+  resolved?: number;
 }
 
 export interface EventLog {
@@ -111,6 +121,23 @@ export interface EventLog {
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
   timestamp: string;
   data_payload?: string;
+}
+
+export interface CommandAuditItem {
+  id: string;
+  command: string;
+  target_device: string;
+  timestamp: string;
+  status: 'SENDING' | 'SENT' | 'ACKNOWLEDGED' | 'FAILED';
+  response_message?: string;
+}
+
+export interface SensorHealthStatus {
+  mpu: 'OPERATIONAL' | 'TIMEOUT' | 'ERROR';
+  pir: 'OPERATIONAL' | 'TIMEOUT' | 'DISABLED';
+  gps: 'LOCKED' | 'SEARCHING' | 'UNAVAILABLE';
+  buzzer: 'OPERATIONAL' | 'ERROR';
+  overallScore: number;
 }
 
 export type AppTab = 'dashboard' | 'sensors' | 'location' | 'alerts' | 'health' | 'settings';

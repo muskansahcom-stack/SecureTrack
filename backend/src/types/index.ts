@@ -27,7 +27,9 @@ export interface DeviceSettings {
   area_security_enabled: number; // 1 = Area PIR Monitoring Active, 0 = OFF
   belonging_name: string; // e.g. "Laptop Bag", "Backpack", "Suitcase"
   belonging_security_enabled: number; // 1 = Belonging MPU6050 Motion Monitoring Active, 0 = OFF
+  security_mode?: string;
   movement_threshold: number; // in g, default 0.30
+  sensitivity_preset?: string;
   pir_enabled: number; // 1 or 0
   mpu_enabled: number; // 1 or 0
   auto_buzzer: number; // 1 or 0
@@ -99,6 +101,7 @@ export interface Alert {
   latitude: number | null;
   longitude: number | null;
   acknowledged: number; // 0 or 1
+  resolved?: number;
 }
 
 export interface EventLog {
@@ -119,6 +122,11 @@ export type DeviceCommandType =
   | 'AREA_SECURITY_OFF'
   | 'BELONGING_SECURITY_ON'
   | 'BELONGING_SECURITY_OFF'
+  | 'SET_MODE_HOME'
+  | 'SET_MODE_AWAY'
+  | 'SET_MODE_TRAVEL'
+  | 'SET_MODE_EMERGENCY'
+  | 'REQUEST_GPS'
   | 'ARM'
   | 'DISARM'
   | 'BUZZER_ON'
@@ -131,7 +139,8 @@ export type DeviceCommandType =
   | 'DISABLE_MPU'
   | 'GET_STATUS'
   | 'RESET_ALERT'
-  | 'REBOOT';
+  | 'REBOOT'
+  | string;
 
 export interface DeviceCommand {
   command: DeviceCommandType;

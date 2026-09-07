@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Lock, Radio, ArrowRight } from 'lucide-react';
+import { Shield, Radio, Activity, Compass, Volume2, ArrowRight, CheckCircle2, Cpu, Wifi, Server } from 'lucide-react';
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -7,83 +7,135 @@ interface SplashScreenProps {
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   return (
-    <div className="fixed inset-0 z-50 bg-gradient-to-b from-[#0b0f19] via-[#0f172a] to-[#0b0f19] flex flex-col justify-between p-6 text-white select-none">
-      {/* Top Header */}
-      <div className="flex items-center justify-between pt-4">
-        <div className="flex items-center space-x-2">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></div>
-          <span className="text-xs font-mono tracking-widest text-emerald-400 uppercase font-semibold">
-            System Online
+    <div className="fixed inset-0 z-50 bg-[#070a12] text-white flex flex-col justify-between p-6 md:p-10 overflow-y-auto select-none">
+      {/* Top Status Bar */}
+      <header className="max-w-4xl w-full mx-auto flex items-center justify-between pt-2">
+        <div className="flex items-center space-x-2.5 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-500/30">
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
+          <span className="text-xs font-mono font-bold tracking-wider text-emerald-300 uppercase">
+            SYSTEM ONLINE
           </span>
         </div>
-        <span className="text-xs text-gray-500 font-mono">v1.0.0</span>
-      </div>
 
-      {/* Center Hero */}
-      <div className="flex flex-col items-center text-center my-auto">
-        <div className="relative mb-8">
-          <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-2xl animate-pulse"></div>
-          <div className="relative w-28 h-28 rounded-3xl bg-gradient-to-tr from-blue-700 via-blue-600 to-indigo-500 flex items-center justify-center shadow-2xl shadow-blue-500/30 border border-blue-400/40">
-            <Shield className="w-14 h-14 text-white" />
+        <div className="flex items-center space-x-2 text-xs font-mono text-gray-400">
+          <Cpu className="w-4 h-4 text-blue-400" />
+          <span className="hidden sm:inline">ESP32 DevKit V1</span>
+          <span className="text-gray-600">•</span>
+          <span>v1.0.0-PRO</span>
+        </div>
+      </header>
+
+      {/* Main Hero & Hardware Cards */}
+      <main className="max-w-4xl w-full mx-auto my-auto py-8 flex flex-col items-center text-center">
+        {/* Shield Icon Container */}
+        <div className="relative mb-6">
+          <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-3xl animate-pulse" />
+          <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 p-[1px] shadow-2xl shadow-blue-500/30">
+            <div className="w-full h-full bg-gray-950 rounded-3xl flex items-center justify-center">
+              <Shield className="w-12 h-12 sm:w-14 sm:h-14 text-blue-400 animate-pulse" />
+            </div>
           </div>
           <div className="absolute -bottom-2 -right-2 p-2 rounded-xl bg-gray-900 border border-gray-700 text-emerald-400 shadow-md">
-            <Radio className="w-5 h-5 animate-pulse" />
+            <Radio className="w-4 h-4 animate-pulse" />
           </div>
         </div>
 
-        <h1 className="text-3xl font-black tracking-tight text-white">
+        {/* Brand Titles */}
+        <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white">
           SECURE<span className="text-blue-400">BELONG</span>
         </h1>
-        <p className="text-sm text-gray-400 mt-2 font-medium max-w-xs">
+        <p className="text-sm sm:text-base text-gray-300 mt-2 font-medium max-w-lg leading-relaxed">
           IoT-Based Personal Belonging & Area Perimeter Security System
         </p>
+        <p className="text-xs font-mono text-cyan-400 mt-1">
+          ESP32 Wi-Fi + MQTT Gateway Ready
+        </p>
 
-        {/* Feature Badges */}
-        <div className="grid grid-cols-2 gap-2.5 mt-8 w-full max-w-xs text-left">
-          <div className="p-3 rounded-xl bg-gray-900/80 border border-gray-800 flex items-center space-x-2.5">
-            <div className="w-2 h-2 rounded-full bg-blue-400"></div>
+        {/* 4 Actual Physical Hardware Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 mt-8 w-full text-left">
+          {/* Hardware 1: MPU6050 */}
+          <div className="p-4 rounded-2xl bg-gray-900/80 border border-gray-800/90 hover:border-blue-500/40 transition shadow-lg flex items-start space-x-3">
+            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20 flex-shrink-0">
+              <Activity className="w-5 h-5" />
+            </div>
             <div>
-              <p className="text-[11px] font-bold text-gray-200">MPU6050 Motion</p>
-              <p className="text-[10px] text-gray-400">Belonging Theft Alert</p>
+              <span className="text-[10px] font-mono font-bold text-blue-400 uppercase tracking-wider block">
+                MPU6050 GY-521
+              </span>
+              <h3 className="text-sm font-bold text-white mt-0.5">Movement Detection</h3>
+              <p className="text-[11px] text-gray-400 mt-1 leading-snug">
+                Laptop bag, luggage & belongings 6-DOF IMU motion detection.
+              </p>
             </div>
           </div>
-          <div className="p-3 rounded-xl bg-gray-900/80 border border-gray-800 flex items-center space-x-2.5">
-            <div className="w-2 h-2 rounded-full bg-indigo-400"></div>
+
+          {/* Hardware 2: HC-SR501 PIR */}
+          <div className="p-4 rounded-2xl bg-gray-900/80 border border-gray-800/90 hover:border-indigo-500/40 transition shadow-lg flex items-start space-x-3">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex-shrink-0">
+              <Radio className="w-5 h-5" />
+            </div>
             <div>
-              <p className="text-[11px] font-bold text-gray-200">HC-SR501 PIR</p>
-              <p className="text-[10px] text-gray-400">Perimeter Intrusion</p>
+              <span className="text-[10px] font-mono font-bold text-indigo-400 uppercase tracking-wider block">
+                HC-SR501 PIR
+              </span>
+              <h3 className="text-sm font-bold text-white mt-0.5">Area Motion Detection</h3>
+              <p className="text-[11px] text-gray-400 mt-1 leading-snug">
+                Hostel room, lab, office & perimeter human intrusion tripwire.
+              </p>
             </div>
           </div>
-          <div className="p-3 rounded-xl bg-gray-900/80 border border-gray-800 flex items-center space-x-2.5">
-            <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
+
+          {/* Hardware 3: NEO-6M GPS */}
+          <div className="p-4 rounded-2xl bg-gray-900/80 border border-gray-800/90 hover:border-emerald-500/40 transition shadow-lg flex items-start space-x-3">
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex-shrink-0">
+              <Compass className="w-5 h-5" />
+            </div>
             <div>
-              <p className="text-[11px] font-bold text-gray-200">NEO-6M GPS</p>
-              <p className="text-[10px] text-gray-400">Real-Time Coordinates</p>
+              <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase tracking-wider block">
+                NEO-6M GPS
+              </span>
+              <h3 className="text-sm font-bold text-white mt-0.5">Real-Time GPS</h3>
+              <p className="text-[11px] text-gray-400 mt-1 leading-snug">
+                Live coordinates, velocity & satellite theft breadcrumb tracking.
+              </p>
             </div>
           </div>
-          <div className="p-3 rounded-xl bg-gray-900/80 border border-gray-800 flex items-center space-x-2.5">
-            <div className="w-2 h-2 rounded-full bg-rose-400"></div>
+
+          {/* Hardware 4: Active Buzzer */}
+          <div className="p-4 rounded-2xl bg-gray-900/80 border border-gray-800/90 hover:border-rose-500/40 transition shadow-lg flex items-start space-x-3">
+            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 flex-shrink-0">
+              <Volume2 className="w-5 h-5" />
+            </div>
             <div>
-              <p className="text-[11px] font-bold text-gray-200">Active Buzzer</p>
-              <p className="text-[10px] text-gray-400">Physical Deterrent</p>
+              <span className="text-[10px] font-mono font-bold text-rose-400 uppercase tracking-wider block">
+                ACTIVE BUZZER
+              </span>
+              <h3 className="text-sm font-bold text-white mt-0.5">Physical Alarm</h3>
+              <p className="text-[11px] text-gray-400 mt-1 leading-snug">
+                High-decibel hardware acoustic deterrent with 2-way web control.
+              </p>
             </div>
           </div>
         </div>
-      </div>
+      </main>
 
       {/* Bottom CTA */}
-      <div className="w-full max-w-md mx-auto mb-4">
+      <footer className="max-w-md w-full mx-auto pb-4">
         <button
           onClick={onComplete}
-          className="w-full py-3.5 px-6 rounded-2xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold text-base shadow-lg shadow-blue-600/30 flex items-center justify-center space-x-2 transition-all transform active:scale-98"
+          className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-base shadow-xl shadow-blue-500/30 flex items-center justify-center space-x-2 transition-all transform active:scale-98"
         >
           <span>ENTER SYSTEM</span>
           <ArrowRight className="w-5 h-5" />
         </button>
-        <p className="text-center text-[11px] text-gray-500 mt-3 font-mono">
-          ESP32 Wi-Fi & MQTT Gateway Ready
-        </p>
-      </div>
+        <div className="flex items-center justify-center space-x-4 text-[11px] font-mono text-gray-500 mt-3">
+          <span>Wi-Fi 802.11 b/g/n</span>
+          <span>•</span>
+          <span>MQTT QoS 1</span>
+          <span>•</span>
+          <span>Full Duplex Gateway</span>
+        </div>
+      </footer>
     </div>
   );
 };
