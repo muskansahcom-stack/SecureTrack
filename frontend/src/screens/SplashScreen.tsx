@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Radio, Activity, Compass, Volume2, ArrowRight, CheckCircle2, Cpu, Wifi, Server } from 'lucide-react';
+import { Radio, Activity, Compass, Volume2, ArrowRight, Cpu } from 'lucide-react';
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -26,17 +26,16 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       </header>
 
       {/* Main Hero & Hardware Cards */}
-      <main className="max-w-4xl w-full mx-auto my-auto py-8 flex flex-col items-center text-center">
-        {/* Shield Icon Container */}
-        <div className="relative mb-6">
-          <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-3xl animate-pulse" />
-          <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 p-[1px] shadow-2xl shadow-blue-500/30">
-            <div className="w-full h-full bg-gray-950 rounded-3xl flex items-center justify-center">
-              <Shield className="w-12 h-12 sm:w-14 sm:h-14 text-blue-400 animate-pulse" />
-            </div>
-          </div>
-          <div className="absolute -bottom-2 -right-2 p-2 rounded-xl bg-gray-900 border border-gray-700 text-emerald-400 shadow-md">
-            <Radio className="w-4 h-4 animate-pulse" />
+      <main className="max-w-4xl w-full mx-auto my-auto py-6 flex flex-col items-center text-center">
+        {/* Logo Artwork Container */}
+        <div className="relative mb-5">
+          <div className="absolute inset-0 bg-blue-500/25 rounded-3xl blur-3xl animate-pulse" />
+          <div className="relative w-36 h-36 sm:w-44 sm:h-44 rounded-3xl overflow-hidden shadow-2xl shadow-blue-500/40 border-2 border-blue-500/40 bg-gray-950">
+            <img
+              src="/logo.png"
+              alt="SecureBelong IoT Platform"
+              className="w-full h-full object-cover"
+            />
           </div>
         </div>
 
@@ -64,7 +63,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
               </span>
               <h3 className="text-sm font-bold text-white mt-0.5">Movement Detection</h3>
               <p className="text-[11px] text-gray-400 mt-1 leading-snug">
-                Laptop bag, luggage & belongings 6-DOF IMU motion detection.
+                Laptop bag, luggage & valuables 6-DOF IMU motion detection.
               </p>
             </div>
           </div>

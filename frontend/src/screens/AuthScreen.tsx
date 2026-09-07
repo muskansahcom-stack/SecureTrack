@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, Lock, Mail, Phone, User, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Lock, Mail, Phone, User, AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.js';
 
 interface AuthScreenProps {
@@ -51,13 +51,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
       <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
 
       <div className="max-w-md w-full mx-auto relative z-10">
-        {/* Header Branding */}
-        <div className="text-center mb-7">
-          <div className="inline-flex p-3.5 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-xl shadow-blue-600/25 mb-3.5 ring-4 ring-blue-500/15">
-            <Shield className="w-9 h-9" />
+        {/* Header Branding with Logo */}
+        <div className="text-center mb-6">
+          <div className="inline-block relative mb-3">
+            <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-2xl shadow-blue-500/30 border-2 border-blue-500/40 mx-auto bg-gray-950">
+              <img
+                src="/logo.png"
+                alt="SecureBelong"
+                className="w-full h-full object-cover"
+              />
+            </div>
           </div>
-          <h1 className="text-2xl font-black tracking-tight text-white">Welcome to SecureBelong</h1>
-          <p className="text-xs text-gray-400 mt-1 font-medium">Personal IoT Security & Live Asset Protection Platform</p>
+          <h1 className="text-2xl font-black tracking-tight text-white">SECURE<span className="text-blue-400">BELONG</span></h1>
+          <p className="text-xs text-gray-400 mt-1 font-medium">Personal Belonging & Area Perimeter Security System</p>
         </div>
 
         {/* Auth Card */}
@@ -89,7 +95,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
           </div>
 
           {error && (
-            <div className="mb-5 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start space-x-2.5 animate-shake">
+            <div className="mb-5 p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start space-x-2.5">
               <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
               <span className="leading-relaxed">{error}</span>
             </div>
@@ -209,7 +215,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
           <div className="mt-5 pt-4 border-t border-gray-800/80 text-center">
             <div className="inline-flex items-center space-x-1.5 text-[11px] text-gray-400 bg-gray-950 px-3 py-1.5 rounded-full border border-gray-800">
               <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-              <span>Demo Login: <strong className="text-gray-200">muskan@securebelong.com</strong> / <strong className="text-gray-200">password123</strong></span>
+              <span>Demo: <strong className="text-gray-200">muskan@securebelong.com</strong> / <strong className="text-gray-200">password123</strong></span>
             </div>
           </div>
         </div>
