@@ -1,0 +1,777 @@
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { io, Socket } from 'socket.io-client';
+import { Device, DeviceSettings, Telemetry, Alert, EventLog, GPSPoint } from '../types/index.js';
+import { api, API_BASE_URL } from '../api/client.js';
+
+interface DeviceContextType {
+  deviceId: string;
+  setDeviceId: (id: string) => void;
+  deviceName: string;
+  setDeviceName: (name: string) => void;
+  isTestMode: boolean;
+  setTestMode: (enabled: boolean) => void;
+  
+  // Real-time state
+  device: Device | null;
+  settings: DeviceSettings | null;
+  telemetry: Telemetry | null;
+  alerts: Alert[];
+  events: EventLog[];
+  activeAlert: Alert | null;
+  setActiveAlert: (a: Alert | null) => void;
+  routeHistory: GPSPoint[];
+  
+  // Independent mode states
+  isAreaActive: boolean;
+  isBelongingActive: boolean;
+
+  // Connection diagnostics
+  isSocketConnected: boolean;
+  isEsp32Connected: boolean;
+  lastHeartbeatAgeSec: number;
+  serverLatencyMs: number;
+  
+  // Independent Security Controls
+  turnOnAreaSecurity: () => Promise<void>;
+  turnOffAreaSecurity: () => Promise<void>;
+  turnOnBelongingSecurity: () => Promise<void>;
+  turnOffBelongingSecurity: () => Promise<void>;
+  updateCustomNames: (areaName: string, belongingName: string) => Promise<void>;
+
+  // System & Alarm Controls
+  armSystem: () => Promise<void>;
+  disarmSystem: () => Promise<void>;
+  activateBuzzer: () => Promise<void>;
+  stopBuzzer: () => Promise<void>;
+  toggleSilentMode: () => Promise<void>;
+  setMovementThreshold: (threshold: number) => Promise<void>;
+  updateSettings: (updates: Partial<DeviceSettings>) => Promise<void>;
+  acknowledgeAlert: (alertId: string) => Promise<void>;
+  clearAlerts: () => Promise<void>;
+  clearEvents: () => Promise<void>;
+  triggerTestAlert: (type: 'MOTION' | 'INTRUSION') => Promise<void>;
+  refreshData: () => Promise<void>;
+}
+
+const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
+
+// ============================================================================
+// ULTIMATE WAKE-UP EMERGENCY KLAXON & AIR-RAID ALARM ENGINE
+// Designed specifically with Sleep-Disruption Psychoacoustics:
+// 1. 520 Hz NFPA/ISO Low-Frequency Square Wave (proven to wake deep sleepers)
+// 2. 1400 Hz - 3200 Hz High-Intensity Industrial Air-Raid Klaxon
+// 3. 3.8 kHz Ultra-Piercing Distress Screech (Human Ear Resonance Peak)
+// 4. Staccato Rapid-Pulse Auditory Shock Modulation (prevents brain habituation)
+// 5. 4.5x Hyper-Gain Non-Linear Saturation & Triple-Stage Peak Maximizer
+// ============================================================================
+class UltraLoudAlarmEngine {
+  private ctx: AudioContext | null = null;
+  private isSirenRunning: boolean = false;
+  
+  // Oscillators
+  private osc520Hz: OscillatorNode | null = null; // 520Hz Wake-Up Square Wave
+  private oscKlaxon: OscillatorNode | null = null; // High-Intensity Air Raid
+  private oscPiercing: OscillatorNode | null = null; // 3.8kHz Screech
+  private oscSubBass: OscillatorNode | null = null; // 220Hz Low Body
+  private oscHarmonic: OscillatorNode | null = null; // 1800Hz Strobe
+
+  // Modulation & Filters
+  private lfoFast: OscillatorNode | null = null;
+  private lfoFastGain: GainNode | null = null;
+  private lfoStutter: OscillatorNode | null = null;
+  private lfoStutterGain: GainNode | null = null;
+  
+  private masterGain: GainNode | null = null;
+  private peakFilter1: BiquadFilterNode | null = null;
+  private peakFilter2: BiquadFilterNode | null = null;
+  private waveShaper: WaveShaperNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
+
+  private initContext() {
+    if (!this.ctx) {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        this.ctx = new AudioCtx();
+      }
+    }
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
+  }
+
+  // Generate hyper-acoustic overdrive saturation curve for extreme decibels
+  private makeHyperDriveCurve(amount: number = 35) {
+    const k = amount;
+    const n_samples = 44100;
+    const curve = new Float32Array(n_samples);
+    const deg = Math.PI / 180;
+    for (let i = 0; i < n_samples; ++i) {
+      const x = (i * 2) / n_samples - 1;
+      curve[i] = ((3 + k) * x * 25 * deg) / (Math.PI + k * Math.abs(x));
+    }
+    return curve;
+  }
+
+  constructor() {
+    // Auto-unlock Web Audio API on first user interaction anywhere on screen
+    if (typeof window !== 'undefined') {
+      const unlockAudio = () => {
+        this.initContext();
+        window.removeEventListener('click', unlockAudio);
+        window.removeEventListener('touchstart', unlockAudio);
+        window.removeEventListener('keydown', unlockAudio);
+      };
+      window.addEventListener('click', unlockAudio, { passive: true });
+      window.addEventListener('touchstart', unlockAudio, { passive: true });
+      window.addEventListener('keydown', unlockAudio, { passive: true });
+    }
+  }
+
+  // Start continuous wake-up emergency air-raid siren
+  public startLoudSiren() {
+    this.initContext();
+    if (!this.ctx || this.isSirenRunning) return;
+
+    try {
+      this.isSirenRunning = true;
+      const now = this.ctx.currentTime;
+
+      // 1. Triple-Stage Dynamics Compressor / Loudness Maximizer
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.setValueAtTime(-28, now);
+      this.compressor.knee.setValueAtTime(4, now);
+      this.compressor.ratio.setValueAtTime(20, now);
+      this.compressor.attack.setValueAtTime(0.001, now);
+      this.compressor.release.setValueAtTime(0.05, now);
+      this.compressor.connect(this.ctx.destination);
+
+      // 2. Dual Psychoacoustic Peaking Filters
+      // A: +16dB Ear-Canal Resonance Peak (3200 Hz)
+      this.peakFilter1 = this.ctx.createBiquadFilter();
+      this.peakFilter1.type = 'peaking';
+      this.peakFilter1.frequency.setValueAtTime(3200, now);
+      this.peakFilter1.Q.setValueAtTime(2.0, now);
+      this.peakFilter1.gain.setValueAtTime(16.0, now);
+      this.peakFilter1.connect(this.compressor);
+
+      // B: +10dB Wake-Up Resonance Peak (520 Hz)
+      this.peakFilter2 = this.ctx.createBiquadFilter();
+      this.peakFilter2.type = 'peaking';
+      this.peakFilter2.frequency.setValueAtTime(520, now);
+      this.peakFilter2.Q.setValueAtTime(2.5, now);
+      this.peakFilter2.gain.setValueAtTime(10.0, now);
+      this.peakFilter2.connect(this.peakFilter1);
+
+      // 3. Hyper-Drive Harmonic WaveShaper (Saturation Maximizer)
+      this.waveShaper = this.ctx.createWaveShaper();
+      this.waveShaper.curve = this.makeHyperDriveCurve(30);
+      this.waveShaper.oversample = '4x';
+      this.waveShaper.connect(this.peakFilter2);
+
+      // 4. Boosted Master Gain Node (4.5x extreme amplification)
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.setValueAtTime(4.5, now);
+      this.masterGain.connect(this.waveShaper);
+
+      // 5. FIVE-SOUND GENERATOR ARRAY:
+      // A. 520Hz Deep Sleep Wake-Up Square Wave (NFPA 72 Standard)
+      this.osc520Hz = this.ctx.createOscillator();
+      this.osc520Hz.type = 'square';
+      this.osc520Hz.frequency.setValueAtTime(520, now);
+
+      // B. High-Intensity Air Raid Klaxon (1200Hz - 2800Hz sweep)
+      this.oscKlaxon = this.ctx.createOscillator();
+      this.oscKlaxon.type = 'sawtooth';
+      this.oscKlaxon.frequency.setValueAtTime(1800, now);
+
+      // C. 3.8kHz Ultra-Piercing Distress Screech
+      this.oscPiercing = this.ctx.createOscillator();
+      this.oscPiercing.type = 'sawtooth';
+      this.oscPiercing.frequency.setValueAtTime(3800, now);
+
+      // D. Harmonic Hi-Lo Siren (1400Hz - 2200Hz)
+      this.oscHarmonic = this.ctx.createOscillator();
+      this.oscHarmonic.type = 'square';
+      this.oscHarmonic.frequency.setValueAtTime(2200, now);
+
+      // E. Sub-Body Low Tone (260Hz)
+      this.oscSubBass = this.ctx.createOscillator();
+      this.oscSubBass.type = 'triangle';
+      this.oscSubBass.frequency.setValueAtTime(260, now);
+
+      // 6. Fast Warble LFO (5.5 Hz rapid distress sweep)
+      this.lfoFast = this.ctx.createOscillator();
+      this.lfoFast.type = 'sawtooth';
+      this.lfoFast.frequency.setValueAtTime(5.5, now);
+
+      this.lfoFastGain = this.ctx.createGain();
+      this.lfoFastGain.gain.setValueAtTime(1000, now); // Sweeps +/- 1000Hz
+
+      this.lfoFast.connect(this.lfoFastGain);
+      this.lfoFastGain.connect(this.oscKlaxon.frequency);
+      this.lfoFastGain.connect(this.oscHarmonic.frequency);
+      this.lfoFastGain.connect(this.oscPiercing.frequency);
+
+      // 7. Staccato Auditory-Shock Modulation (6 Hz staccato pulse)
+      this.lfoStutter = this.ctx.createOscillator();
+      this.lfoStutter.type = 'square';
+      this.lfoStutter.frequency.setValueAtTime(6.0, now);
+
+      this.lfoStutterGain = this.ctx.createGain();
+      this.lfoStutterGain.gain.setValueAtTime(180, now);
+      this.lfoStutter.connect(this.lfoStutterGain);
+      this.lfoStutterGain.connect(this.osc520Hz.frequency);
+
+      // Connect all 5 audio generators to master gain
+      this.osc520Hz.connect(this.masterGain);
+      this.oscKlaxon.connect(this.masterGain);
+      this.oscPiercing.connect(this.masterGain);
+      this.oscHarmonic.connect(this.masterGain);
+      this.oscSubBass.connect(this.masterGain);
+
+      // Start all sound engines
+      this.osc520Hz.start(now);
+      this.oscKlaxon.start(now);
+      this.oscPiercing.start(now);
+      this.oscHarmonic.start(now);
+      this.oscSubBass.start(now);
+      this.lfoFast.start(now);
+      this.lfoStutter.start(now);
+    } catch (e) {
+      console.warn('[Audio] Error starting wake-up siren:', e);
+    }
+  }
+
+  // Stop continuous siren immediately
+  public stopLoudSiren() {
+    if (!this.isSirenRunning || !this.ctx) return;
+    try {
+      this.isSirenRunning = false;
+      const now = this.ctx.currentTime;
+      if (this.masterGain) {
+        this.masterGain.gain.linearRampToValueAtTime(0.001, now + 0.03);
+      }
+      setTimeout(() => {
+        try {
+          if (this.osc520Hz) { this.osc520Hz.stop(); this.osc520Hz.disconnect(); this.osc520Hz = null; }
+          if (this.oscKlaxon) { this.oscKlaxon.stop(); this.oscKlaxon.disconnect(); this.oscKlaxon = null; }
+          if (this.oscPiercing) { this.oscPiercing.stop(); this.oscPiercing.disconnect(); this.oscPiercing = null; }
+          if (this.oscHarmonic) { this.oscHarmonic.stop(); this.oscHarmonic.disconnect(); this.oscHarmonic = null; }
+          if (this.oscSubBass) { this.oscSubBass.stop(); this.oscSubBass.disconnect(); this.oscSubBass = null; }
+          if (this.lfoFast) { this.lfoFast.stop(); this.lfoFast.disconnect(); this.lfoFast = null; }
+          if (this.lfoFastGain) { this.lfoFastGain.disconnect(); this.lfoFastGain = null; }
+          if (this.lfoStutter) { this.lfoStutter.stop(); this.lfoStutter.disconnect(); this.lfoStutter = null; }
+          if (this.lfoStutterGain) { this.lfoStutterGain.disconnect(); this.lfoStutterGain = null; }
+          if (this.masterGain) { this.masterGain.disconnect(); this.masterGain = null; }
+          if (this.waveShaper) { this.waveShaper.disconnect(); this.waveShaper = null; }
+          if (this.peakFilter1) { this.peakFilter1.disconnect(); this.peakFilter1 = null; }
+          if (this.peakFilter2) { this.peakFilter2.disconnect(); this.peakFilter2 = null; }
+          if (this.compressor) { this.compressor.disconnect(); this.compressor = null; }
+        } catch (_) {}
+      }, 40);
+    } catch (e) {
+      this.isSirenRunning = false;
+    }
+  }
+
+  // Play maximum volume one-shot tones
+  public playTone(type: 'CRITICAL' | 'HIGH' | 'CHIRP') {
+    this.initContext();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      const comp = this.ctx.createDynamicsCompressor();
+      comp.threshold.setValueAtTime(-18, now);
+      comp.ratio.setValueAtTime(20, now);
+      comp.connect(this.ctx.destination);
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'peaking';
+      filter.frequency.setValueAtTime(3200, now);
+      filter.gain.setValueAtTime(14.0, now);
+      filter.connect(comp);
+
+      osc.connect(gain);
+      gain.connect(filter);
+
+      if (type === 'CRITICAL') {
+        // High-volume 2-tone alarm burst
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(2400, now);
+        osc.frequency.exponentialRampToValueAtTime(3600, now + 0.15);
+        osc.frequency.exponentialRampToValueAtTime(1800, now + 0.35);
+        gain.gain.setValueAtTime(3.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+        osc.start(now);
+        osc.stop(now + 0.7);
+      } else if (type === 'HIGH') {
+        // High-volume pulse beep
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(2000, now);
+        gain.gain.setValueAtTime(3.0, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        osc.start(now);
+        osc.stop(now + 0.35);
+      } else {
+        // Crisp confirmation chirp
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1500, now);
+        osc.frequency.exponentialRampToValueAtTime(2600, now + 0.08);
+        gain.gain.setValueAtTime(1.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+        osc.start(now);
+        osc.stop(now + 0.12);
+      }
+    } catch (e) {}
+  }
+}
+
+export const alarmAudio = new UltraLoudAlarmEngine();
+
+export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [deviceId, setDeviceIdState] = useState<string>(
+    localStorage.getItem('securebelong_device_id') || 'ESP32-SECURITY-001'
+  );
+  const [deviceName, setDeviceNameState] = useState<string>(
+    localStorage.getItem('securebelong_device_name') || 'Personal Belonging Unit 1'
+  );
+  const [isTestMode, setIsTestModeState] = useState<boolean>(
+    localStorage.getItem('securebelong_test_mode') === 'true'
+  );
+
+  const [device, setDevice] = useState<Device | null>(null);
+  const [settings, setSettings] = useState<DeviceSettings | null>(null);
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [events, setEvents] = useState<EventLog[]>([]);
+  const [activeAlert, setActiveAlert] = useState<Alert | null>(null);
+  const [routeHistory, setRouteHistory] = useState<GPSPoint[]>([]);
+
+  const [isSocketConnected, setIsSocketConnected] = useState<boolean>(false);
+  const [lastHeartbeatAgeSec, setLastHeartbeatAgeSec] = useState<number>(0);
+  const [serverLatencyMs, setServerLatencyMs] = useState<number>(0);
+
+  const socketRef = useRef<Socket | null>(null);
+  const lastHeartbeatTimeRef = useRef<number>(Date.now());
+
+  const setDeviceId = (id: string) => {
+    setDeviceIdState(id);
+    localStorage.setItem('securebelong_device_id', id);
+  };
+
+  const setDeviceName = (name: string) => {
+    setDeviceNameState(name);
+    localStorage.setItem('securebelong_device_name', name);
+  };
+
+  const setTestMode = (enabled: boolean) => {
+    setIsTestModeState(enabled);
+    localStorage.setItem('securebelong_test_mode', enabled ? 'true' : 'false');
+  };
+
+  // Fetch initial REST data
+  const refreshData = useCallback(async () => {
+    try {
+      const startTime = Date.now();
+      const [statusRes, alertsRes, eventsRes, settingsRes, routeRes] = await Promise.allSettled([
+        api.getDeviceStatus(deviceId),
+        api.getAlerts(deviceId),
+        api.getEvents(deviceId),
+        api.getDeviceSettings(deviceId),
+        api.getGPSRoute(deviceId, 100),
+      ]);
+
+      setServerLatencyMs(Date.now() - startTime);
+
+      if (statusRes.status === 'fulfilled' && statusRes.value.data) {
+        setDevice(statusRes.value.data.device);
+        if (statusRes.value.data.latestTelemetry && !isTestMode) {
+          setTelemetry(statusRes.value.data.latestTelemetry);
+        }
+        if (statusRes.value.data.device?.last_seen) {
+          lastHeartbeatTimeRef.current = new Date(statusRes.value.data.device.last_seen).getTime();
+        }
+      }
+
+      if (settingsRes.status === 'fulfilled' && settingsRes.value.data) {
+        setSettings(settingsRes.value.data);
+      }
+
+      if (alertsRes.status === 'fulfilled' && alertsRes.value.data) {
+        setAlerts(alertsRes.value.data);
+      }
+
+      if (eventsRes.status === 'fulfilled' && eventsRes.value.data) {
+        setEvents(eventsRes.value.data);
+      }
+
+      if (routeRes.status === 'fulfilled' && Array.isArray(routeRes.value.data)) {
+        setRouteHistory(routeRes.value.data);
+      }
+    } catch (err) {
+      console.warn('Error fetching device data:', err);
+    }
+  }, [deviceId, isTestMode]);
+
+  // WebSocket Connection
+  useEffect(() => {
+    const socket = io(API_BASE_URL, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.log('[Socket.io] Connected to backend');
+      setIsSocketConnected(true);
+      socket.emit('join:device', deviceId);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('[Socket.io] Disconnected from backend');
+      setIsSocketConnected(false);
+    });
+
+    socket.on('device:telemetry', (data: Telemetry) => {
+      if (data.device_id === deviceId && !isTestMode) {
+        setTelemetry(data);
+        lastHeartbeatTimeRef.current = Date.now();
+        setDevice((prev) => (prev ? { ...prev, is_online: 1, last_seen: data.timestamp } : prev));
+
+        // If ESP32 buzzer is actively screaming, sound the web app high-power siren!
+        if (data.buzzer_active && settings?.silent_mode !== 1) {
+          alarmAudio.startLoudSiren();
+        }
+
+        if (data.gps?.valid && data.gps.latitude && data.gps.longitude) {
+          setRouteHistory((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.latitude === data.gps.latitude && last.longitude === data.gps.longitude) {
+              return prev;
+            }
+            const newPoint: GPSPoint = {
+              latitude: data.gps.latitude!,
+              longitude: data.gps.longitude!,
+              altitude: data.gps.altitude,
+              speed: data.gps.speed,
+              timestamp: data.timestamp || new Date().toISOString(),
+            };
+            return [...prev.slice(-99), newPoint];
+          });
+        }
+      }
+    });
+
+    socket.on('device:alert', (alert: Alert) => {
+      if (alert.device_id === deviceId) {
+        setAlerts((prev) => [alert, ...prev.filter((a) => a.id !== alert.id)]);
+        setActiveAlert(alert);
+        if (settings?.silent_mode !== 1) {
+          alarmAudio.startLoudSiren();
+        } else {
+          alarmAudio.playTone('CRITICAL');
+        }
+      }
+    });
+
+    socket.on('device:status', (statusUpdate: Partial<Device> & { device_id: string }) => {
+      if (statusUpdate.device_id === deviceId) {
+        setDevice((prev) => (prev ? { ...prev, ...statusUpdate } : (statusUpdate as Device)));
+        if (statusUpdate.last_seen) {
+          lastHeartbeatTimeRef.current = new Date(statusUpdate.last_seen).getTime();
+        }
+      }
+    });
+
+    socket.on('device:command_ack', (ack: any) => {
+      console.log('[Command Ack]', ack);
+      alarmAudio.playTone('CHIRP');
+      refreshData();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [deviceId, isTestMode, refreshData]);
+
+  // Initial load
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+
+  // Heartbeat age counter
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - lastHeartbeatTimeRef.current) / 1000));
+      setLastHeartbeatAgeSec(elapsedSec);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // TEST / SIMULATION MODE GENERATOR (Strictly separated sandbox)
+  useEffect(() => {
+    if (!isTestMode) return;
+
+    console.log('[Simulation] Test mode active. Generating simulated sensor stream.');
+    const simInterval = setInterval(() => {
+      const isArmed = device?.is_armed === 1;
+      const baseAccel = 1.0;
+      const noise = (Math.random() - 0.5) * 0.04;
+      const simMagnitude = Math.abs(noise);
+
+      setTelemetry({
+        device_id: deviceId,
+        timestamp: new Date().toISOString(),
+        mpu: {
+          accel_x: parseFloat(((Math.random() - 0.5) * 0.08).toFixed(3)),
+          accel_y: parseFloat(((Math.random() - 0.5) * 0.08).toFixed(3)),
+          accel_z: parseFloat((baseAccel + noise).toFixed(3)),
+          gyro_x: parseFloat(((Math.random() - 0.5) * 2.0).toFixed(2)),
+          gyro_y: parseFloat(((Math.random() - 0.5) * 2.0).toFixed(2)),
+          gyro_z: parseFloat(((Math.random() - 0.5) * 2.0).toFixed(2)),
+          magnitude: parseFloat(simMagnitude.toFixed(3)),
+          motion_detected: simMagnitude > 0.3,
+        },
+        pir: {
+          motion: false,
+          raw_val: 0,
+        },
+        gps: {
+          latitude: 28.613939,
+          longitude: 77.209021,
+          valid: true,
+          satellites: 9,
+          altitude: 216.5,
+          speed: 0.0,
+        },
+        buzzer_active: false,
+        system_armed: isArmed,
+        free_heap: 182400,
+        uptime_sec: 3600,
+        wifi_rssi: -58,
+      });
+
+      setDevice((prev) =>
+        prev
+          ? { ...prev, is_online: 1, last_seen: new Date().toISOString() }
+          : {
+              id: 'sim_dev',
+              device_id: deviceId,
+              device_name: 'Simulated ESP32 Test Rig',
+              user_id: 'usr_test',
+              is_online: 1,
+              is_armed: isArmed ? 1 : 0,
+              last_seen: new Date().toISOString(),
+              firmware_version: 'v1.0.0-TEST',
+              wifi_rssi: -58,
+              created_at: new Date().toISOString(),
+            }
+      );
+      lastHeartbeatTimeRef.current = Date.now();
+    }, 1000);
+
+    return () => clearInterval(simInterval);
+  }, [isTestMode, deviceId, device?.is_armed]);
+
+  // Independent Security Controls
+  const turnOnAreaSecurity = async () => {
+    alarmAudio.playTone('CHIRP');
+    if (isTestMode) {
+      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 1 } : null));
+    }
+    await api.sendCommand(deviceId, 'AREA_SECURITY_ON');
+    await refreshData();
+  };
+
+  const turnOffAreaSecurity = async () => {
+    alarmAudio.playTone('CHIRP');
+    if (isTestMode) {
+      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 0 } : null));
+    }
+    await api.sendCommand(deviceId, 'AREA_SECURITY_OFF');
+    await refreshData();
+  };
+
+  const turnOnBelongingSecurity = async () => {
+    alarmAudio.playTone('CHIRP');
+    if (isTestMode) {
+      setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 1 } : null));
+    }
+    await api.sendCommand(deviceId, 'BELONGING_SECURITY_ON');
+    await refreshData();
+  };
+
+  const turnOffBelongingSecurity = async () => {
+    alarmAudio.playTone('CHIRP');
+    if (isTestMode) {
+      setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 0 } : null));
+    }
+    await api.sendCommand(deviceId, 'BELONGING_SECURITY_OFF');
+    await refreshData();
+  };
+
+  const updateCustomNames = async (areaName: string, belongingName: string) => {
+    const res = await api.updateDeviceSettings(deviceId, {
+      area_name: areaName,
+      belonging_name: belongingName,
+    });
+    setSettings(res.data);
+  };
+
+  // Actions
+  const armSystem = async () => {
+    alarmAudio.playTone('CHIRP');
+    if (isTestMode) {
+      setDevice((prev) => (prev ? { ...prev, is_armed: 1 } : null));
+      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 1, belonging_security_enabled: 1 } : null));
+    }
+    await api.sendCommand(deviceId, 'ARM');
+    await refreshData();
+  };
+
+  const disarmSystem = async () => {
+    alarmAudio.playTone('CHIRP');
+    alarmAudio.stopLoudSiren();
+    if (isTestMode) {
+      setDevice((prev) => (prev ? { ...prev, is_armed: 0 } : null));
+      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 0, belonging_security_enabled: 0 } : null));
+    }
+    await api.sendCommand(deviceId, 'DISARM');
+    await refreshData();
+  };
+
+  const activateBuzzer = async () => {
+    alarmAudio.startLoudSiren();
+    await api.sendCommand(deviceId, 'BUZZER_ON');
+    await refreshData();
+  };
+
+  const stopBuzzer = async () => {
+    alarmAudio.stopLoudSiren();
+    alarmAudio.playTone('CHIRP');
+    await api.sendCommand(deviceId, 'BUZZER_OFF');
+    setActiveAlert(null);
+    await refreshData();
+  };
+
+  const toggleSilentMode = async () => {
+    alarmAudio.playTone('CHIRP');
+    const currentVal = settings?.silent_mode ?? 0;
+    const newVal = currentVal === 1 ? 0 : 1;
+    if (newVal === 1) {
+      alarmAudio.stopLoudSiren();
+    }
+    const res = await api.updateDeviceSettings(deviceId, { silent_mode: newVal });
+    setSettings(res.data);
+  };
+
+  const setMovementThreshold = async (threshold: number) => {
+    await api.updateDeviceSettings(deviceId, { movement_threshold: threshold });
+    setSettings((prev) => (prev ? { ...prev, movement_threshold: threshold } : null));
+  };
+
+  const updateSettings = async (updates: Partial<DeviceSettings>) => {
+    const res = await api.updateDeviceSettings(deviceId, updates);
+    setSettings(res.data);
+  };
+
+  const acknowledgeAlert = async (alertId: string) => {
+    alarmAudio.stopLoudSiren();
+    await api.acknowledgeAlert(alertId);
+    setAlerts((prev) =>
+      prev.map((a) => (a.id === alertId ? { ...a, acknowledged: 1 } : a))
+    );
+    if (activeAlert?.id === alertId) {
+      setActiveAlert(null);
+    }
+  };
+
+  const clearAlerts = async () => {
+    alarmAudio.stopLoudSiren();
+    await api.clearAlerts(deviceId);
+    setAlerts([]);
+    setActiveAlert(null);
+  };
+
+  const clearEvents = async () => {
+    await api.clearEvents(deviceId);
+    setEvents([]);
+  };
+
+  const triggerTestAlert = async (type: 'MOTION' | 'INTRUSION') => {
+    await api.triggerSimulationAlert({
+      device_id: deviceId,
+      alert_type: type,
+      title: type === 'MOTION' ? '🚨 [TEST] Belonging Movement' : '🚨 [TEST] Area Intrusion',
+      description:
+        type === 'MOTION'
+          ? 'Simulated personal belonging displacement detected.'
+          : 'Simulated human motion detected in security perimeter.',
+      severity: type === 'MOTION' ? 'HIGH' : 'CRITICAL',
+    });
+    await refreshData();
+  };
+
+  const isEsp32Connected = isTestMode ? true : device?.is_online === 1 && lastHeartbeatAgeSec < 15;
+  const isAreaActive = settings?.area_security_enabled === 1 || telemetry?.area_security_enabled === true;
+  const isBelongingActive = settings?.belonging_security_enabled === 1 || telemetry?.belonging_security_enabled === true;
+
+  return (
+    <DeviceContext.Provider
+      value={{
+        deviceId,
+        setDeviceId,
+        deviceName,
+        setDeviceName,
+        isTestMode,
+        setTestMode,
+        device,
+        settings,
+        telemetry,
+        alerts,
+        events,
+        activeAlert,
+        setActiveAlert,
+        routeHistory,
+        isAreaActive,
+        isBelongingActive,
+        isSocketConnected,
+        isEsp32Connected,
+        lastHeartbeatAgeSec,
+        serverLatencyMs,
+        turnOnAreaSecurity,
+        turnOffAreaSecurity,
+        turnOnBelongingSecurity,
+        turnOffBelongingSecurity,
+        updateCustomNames,
+        armSystem,
+        disarmSystem,
+        activateBuzzer,
+        stopBuzzer,
+        toggleSilentMode,
+        setMovementThreshold,
+        updateSettings,
+        acknowledgeAlert,
+        clearAlerts,
+        clearEvents,
+        triggerTestAlert,
+        refreshData,
+      }}
+    >
+      {children}
+    </DeviceContext.Provider>
+  );
+};
+
+export const useDevice = () => {
+  const ctx = useContext(DeviceContext);
+  if (!ctx) throw new Error('useDevice must be used within a DeviceProvider');
+  return ctx;
+};
