@@ -82,27 +82,41 @@ interface DeviceContextType {
 const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
 
 // ============================================================================
-// ULTIMATE WAKE-UP EMERGENCY KLAXON & AIR-RAID ALARM ENGINE
-// Psychoacoustic Sleep-Disruption Synthesis
+// AUTHENTIC POLICE CRUISER SIREN & EMERGENCY ACOUSTIC SYNTHESIZER
+// Modeled after authentic Federal Signal / Whelen electronic emergency vehicle sirens:
+// 1. Authentic Police Wail: 550 Hz - 1600 Hz smooth undulating continuous sweep (0.26 Hz)
+// 2. Tactical Police Yelp: 650 Hz - 1650 Hz rapid cycling emergency pursuit (3.6 Hz)
+// 3. Ultra Piercer / Phaser: 750 Hz - 1800 Hz high-frequency warning (9.5 Hz)
+// 4. European / Tactical Hi-Lo: Dual-tone alternating horn (680 Hz / 940 Hz)
+// 5. Dual Cruiser Siren: Wail + Harmonized Horn resonance + Yelp subharmonic
 // ============================================================================
-class UltraLoudAlarmEngine {
+export type PoliceSirenMode = 'CRUISER' | 'WAIL' | 'YELP' | 'PIERCER' | 'HILO';
+
+class PoliceEmergencySirenEngine {
   private ctx: AudioContext | null = null;
   private isSirenRunning: boolean = false;
+  private currentMode: PoliceSirenMode = 'CRUISER';
+  private currentVolume: number = 0.85;
 
-  private osc520Hz: OscillatorNode | null = null;
-  private oscKlaxon: OscillatorNode | null = null;
-  private oscPiercing: OscillatorNode | null = null;
-  private oscSubBass: OscillatorNode | null = null;
-  private oscHarmonic: OscillatorNode | null = null;
+  // Primary & Harmonic Oscillators
+  private oscPrimary: OscillatorNode | null = null;
+  private oscSecondary: OscillatorNode | null = null;
+  private oscSubHorn: OscillatorNode | null = null;
+  private oscTweeter: OscillatorNode | null = null;
+
+  // Siren Modulation LFOs
+  private lfoPrimary: OscillatorNode | null = null;
+  private lfoPrimaryGain: GainNode | null = null;
+  private lfoSecondaryGain: GainNode | null = null;
 
   private lfoFast: OscillatorNode | null = null;
   private lfoFastGain: GainNode | null = null;
-  private lfoStutter: OscillatorNode | null = null;
-  private lfoStutterGain: GainNode | null = null;
 
+  // Signal Processing & Formant Modeling
   private masterGain: GainNode | null = null;
-  private peakFilter1: BiquadFilterNode | null = null;
-  private peakFilter2: BiquadFilterNode | null = null;
+  private hornFilter1: BiquadFilterNode | null = null;
+  private hornFilter2: BiquadFilterNode | null = null;
+  private hornFilter3: BiquadFilterNode | null = null;
   private waveShaper: WaveShaperNode | null = null;
   private compressor: DynamicsCompressorNode | null = null;
 
@@ -118,14 +132,15 @@ class UltraLoudAlarmEngine {
     }
   }
 
-  private makeHyperDriveCurve(amount: number = 35) {
+  // Generate realistic emergency speaker horn saturation curve
+  private makeHornCurve(amount: number = 18) {
     const k = amount;
     const n_samples = 44100;
     const curve = new Float32Array(n_samples);
     const deg = Math.PI / 180;
     for (let i = 0; i < n_samples; ++i) {
       const x = (i * 2) / n_samples - 1;
-      curve[i] = ((3 + k) * x * 25 * deg) / (Math.PI + k * Math.abs(x));
+      curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
     }
     return curve;
   }
@@ -144,136 +159,253 @@ class UltraLoudAlarmEngine {
     }
   }
 
-  public startLoudSiren() {
-    this.initContext();
-    if (!this.ctx || this.isSirenRunning) return;
+  public isRunning(): boolean {
+    return this.isSirenRunning;
+  }
 
-    try {
-      this.isSirenRunning = true;
-      const now = this.ctx.currentTime;
+  public getMode(): PoliceSirenMode {
+    return this.currentMode;
+  }
 
-      this.compressor = this.ctx.createDynamicsCompressor();
-      this.compressor.threshold.setValueAtTime(-28, now);
-      this.compressor.knee.setValueAtTime(4, now);
-      this.compressor.ratio.setValueAtTime(20, now);
-      this.compressor.attack.setValueAtTime(0.001, now);
-      this.compressor.release.setValueAtTime(0.05, now);
-      this.compressor.connect(this.ctx.destination);
-
-      this.peakFilter1 = this.ctx.createBiquadFilter();
-      this.peakFilter1.type = 'peaking';
-      this.peakFilter1.frequency.setValueAtTime(3200, now);
-      this.peakFilter1.Q.setValueAtTime(2.0, now);
-      this.peakFilter1.gain.setValueAtTime(16.0, now);
-      this.peakFilter1.connect(this.compressor);
-
-      this.peakFilter2 = this.ctx.createBiquadFilter();
-      this.peakFilter2.type = 'peaking';
-      this.peakFilter2.frequency.setValueAtTime(520, now);
-      this.peakFilter2.Q.setValueAtTime(2.5, now);
-      this.peakFilter2.gain.setValueAtTime(10.0, now);
-      this.peakFilter2.connect(this.peakFilter1);
-
-      this.waveShaper = this.ctx.createWaveShaper();
-      this.waveShaper.curve = this.makeHyperDriveCurve(30);
-      this.waveShaper.oversample = '4x';
-      this.waveShaper.connect(this.peakFilter2);
-
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(4.5, now);
-      this.masterGain.connect(this.waveShaper);
-
-      this.osc520Hz = this.ctx.createOscillator();
-      this.osc520Hz.type = 'square';
-      this.osc520Hz.frequency.setValueAtTime(520, now);
-
-      this.oscKlaxon = this.ctx.createOscillator();
-      this.oscKlaxon.type = 'sawtooth';
-      this.oscKlaxon.frequency.setValueAtTime(1800, now);
-
-      this.oscPiercing = this.ctx.createOscillator();
-      this.oscPiercing.type = 'sawtooth';
-      this.oscPiercing.frequency.setValueAtTime(3800, now);
-
-      this.oscHarmonic = this.ctx.createOscillator();
-      this.oscHarmonic.type = 'square';
-      this.oscHarmonic.frequency.setValueAtTime(2200, now);
-
-      this.oscSubBass = this.ctx.createOscillator();
-      this.oscSubBass.type = 'triangle';
-      this.oscSubBass.frequency.setValueAtTime(260, now);
-
-      this.lfoFast = this.ctx.createOscillator();
-      this.lfoFast.type = 'sawtooth';
-      this.lfoFast.frequency.setValueAtTime(5.5, now);
-
-      this.lfoFastGain = this.ctx.createGain();
-      this.lfoFastGain.gain.setValueAtTime(1000, now);
-
-      this.lfoFast.connect(this.lfoFastGain);
-      this.lfoFastGain.connect(this.oscKlaxon.frequency);
-      this.lfoFastGain.connect(this.oscHarmonic.frequency);
-      this.lfoFastGain.connect(this.oscPiercing.frequency);
-
-      this.lfoStutter = this.ctx.createOscillator();
-      this.lfoStutter.type = 'square';
-      this.lfoStutter.frequency.setValueAtTime(6.0, now);
-
-      this.lfoStutterGain = this.ctx.createGain();
-      this.lfoStutterGain.gain.setValueAtTime(180, now);
-      this.lfoStutter.connect(this.lfoStutterGain);
-      this.lfoStutterGain.connect(this.osc520Hz.frequency);
-
-      this.osc520Hz.connect(this.masterGain);
-      this.oscKlaxon.connect(this.masterGain);
-      this.oscPiercing.connect(this.masterGain);
-      this.oscHarmonic.connect(this.masterGain);
-      this.oscSubBass.connect(this.masterGain);
-
-      this.osc520Hz.start(now);
-      this.oscKlaxon.start(now);
-      this.oscPiercing.start(now);
-      this.oscHarmonic.start(now);
-      this.oscSubBass.start(now);
-      this.lfoFast.start(now);
-      this.lfoStutter.start(now);
-    } catch (e) {
-      console.warn('[Audio] Error starting wake-up siren:', e);
+  public setVolume(vol: number) {
+    this.currentVolume = Math.max(0, Math.min(1, vol));
+    if (this.masterGain && this.ctx) {
+      this.masterGain.gain.setValueAtTime(this.currentVolume * 2.8, this.ctx.currentTime);
     }
   }
 
+  // Start continuous authentic Police Siren
+  public startLoudSiren(mode: PoliceSirenMode = 'CRUISER') {
+    this.initContext();
+    if (!this.ctx) return;
+
+    if (this.isSirenRunning) {
+      this.stopLoudSiren();
+    }
+
+    try {
+      this.isSirenRunning = true;
+      this.currentMode = mode;
+      const now = this.ctx.currentTime;
+
+      // 1. Dynamics Compressor (Prevents speaker clipping while maximizing acoustic punch)
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.setValueAtTime(-20, now);
+      this.compressor.knee.setValueAtTime(4, now);
+      this.compressor.ratio.setValueAtTime(14, now);
+      this.compressor.attack.setValueAtTime(0.002, now);
+      this.compressor.release.setValueAtTime(0.05, now);
+      this.compressor.connect(this.ctx.destination);
+
+      // 2. Siren Horn Resonance Formant Filters (100W Speaker Bell Flare Simulation)
+      this.hornFilter1 = this.ctx.createBiquadFilter();
+      this.hornFilter1.type = 'peaking';
+      this.hornFilter1.frequency.setValueAtTime(2800, now);
+      this.hornFilter1.Q.setValueAtTime(2.0, now);
+      this.hornFilter1.gain.setValueAtTime(12.0, now);
+      this.hornFilter1.connect(this.compressor);
+
+      this.hornFilter2 = this.ctx.createBiquadFilter();
+      this.hornFilter2.type = 'peaking';
+      this.hornFilter2.frequency.setValueAtTime(1150, now);
+      this.hornFilter2.Q.setValueAtTime(1.8, now);
+      this.hornFilter2.gain.setValueAtTime(10.0, now);
+      this.hornFilter2.connect(this.hornFilter1);
+
+      this.hornFilter3 = this.ctx.createBiquadFilter();
+      this.hornFilter3.type = 'lowpass';
+      this.hornFilter3.frequency.setValueAtTime(5500, now);
+      this.hornFilter3.Q.setValueAtTime(0.7, now);
+      this.hornFilter3.connect(this.hornFilter2);
+
+      // 3. Siren Horn Overdrive WaveShaper (Adds authentic emergency vehicle acoustic bite)
+      this.waveShaper = this.ctx.createWaveShaper();
+      this.waveShaper.curve = this.makeHornCurve(16);
+      this.waveShaper.oversample = '4x';
+      this.waveShaper.connect(this.hornFilter3);
+
+      // 4. Master Volume Gain
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.setValueAtTime(0.01, now);
+      this.masterGain.gain.linearRampToValueAtTime(this.currentVolume * 2.8, now + 0.08);
+      this.masterGain.connect(this.waveShaper);
+
+      // Configure based on selected siren mode
+      if (mode === 'WAIL' || mode === 'CRUISER') {
+        // --- POLICE WAIL MODE ---
+        // Primary Sawtooth Carrier (Center: 1050 Hz)
+        this.oscPrimary = this.ctx.createOscillator();
+        this.oscPrimary.type = 'sawtooth';
+        this.oscPrimary.frequency.setValueAtTime(1050, now);
+
+        // Secondary Square Carrier with slight detune for authentic chorused acoustic body
+        this.oscSecondary = this.ctx.createOscillator();
+        this.oscSecondary.type = 'square';
+        this.oscSecondary.frequency.setValueAtTime(1058, now);
+
+        // Sub-Horn Resonator (260 Hz)
+        this.oscSubHorn = this.ctx.createOscillator();
+        this.oscSubHorn.type = 'triangle';
+        this.oscSubHorn.frequency.setValueAtTime(260, now);
+
+        // Piercing Overtone (3150 Hz)
+        this.oscTweeter = this.ctx.createOscillator();
+        this.oscTweeter.type = 'sawtooth';
+        this.oscTweeter.frequency.setValueAtTime(3150, now);
+
+        // Main Wail LFO: Smooth 0.25 Hz undulating rise & fall (550 Hz - 1550 Hz)
+        this.lfoPrimary = this.ctx.createOscillator();
+        this.lfoPrimary.type = 'triangle';
+        this.lfoPrimary.frequency.setValueAtTime(0.25, now);
+
+        this.lfoPrimaryGain = this.ctx.createGain();
+        this.lfoPrimaryGain.gain.setValueAtTime(500, now); // Sweeps 550 Hz to 1550 Hz
+        this.lfoPrimary.connect(this.lfoPrimaryGain);
+        this.lfoPrimaryGain.connect(this.oscPrimary.frequency);
+
+        this.lfoSecondaryGain = this.ctx.createGain();
+        this.lfoSecondaryGain.gain.setValueAtTime(510, now);
+        this.lfoPrimary.connect(this.lfoSecondaryGain);
+        this.lfoSecondaryGain.connect(this.oscSecondary.frequency);
+        this.lfoSecondaryGain.connect(this.oscTweeter.frequency);
+
+        if (mode === 'CRUISER') {
+          // Add layered tactical fast pulse undertone
+          this.lfoFast = this.ctx.createOscillator();
+          this.lfoFast.type = 'sawtooth';
+          this.lfoFast.frequency.setValueAtTime(3.6, now);
+
+          this.lfoFastGain = this.ctx.createGain();
+          this.lfoFastGain.gain.setValueAtTime(120, now);
+          this.lfoFast.connect(this.lfoFastGain);
+          this.lfoFastGain.connect(this.oscSubHorn.frequency);
+          this.lfoFast.start(now);
+        }
+
+        this.oscPrimary.connect(this.masterGain);
+        this.oscSecondary.connect(this.masterGain);
+        this.oscSubHorn.connect(this.masterGain);
+        this.oscTweeter.connect(this.masterGain);
+
+        this.oscPrimary.start(now);
+        this.oscSecondary.start(now);
+        this.oscSubHorn.start(now);
+        this.oscTweeter.start(now);
+        this.lfoPrimary.start(now);
+
+      } else if (mode === 'YELP') {
+        // --- POLICE YELP MODE (Rapid tactical sweep 3.6 Hz) ---
+        this.oscPrimary = this.ctx.createOscillator();
+        this.oscPrimary.type = 'sawtooth';
+        this.oscPrimary.frequency.setValueAtTime(1150, now);
+
+        this.oscSecondary = this.ctx.createOscillator();
+        this.oscSecondary.type = 'square';
+        this.oscSecondary.frequency.setValueAtTime(1160, now);
+
+        this.lfoPrimary = this.ctx.createOscillator();
+        this.lfoPrimary.type = 'sawtooth';
+        this.lfoPrimary.frequency.setValueAtTime(3.6, now); // ~216 cycles/min
+
+        this.lfoPrimaryGain = this.ctx.createGain();
+        this.lfoPrimaryGain.gain.setValueAtTime(500, now); // 650 Hz to 1650 Hz
+        this.lfoPrimary.connect(this.lfoPrimaryGain);
+        this.lfoPrimaryGain.connect(this.oscPrimary.frequency);
+        this.lfoPrimaryGain.connect(this.oscSecondary.frequency);
+
+        this.oscPrimary.connect(this.masterGain);
+        this.oscSecondary.connect(this.masterGain);
+
+        this.oscPrimary.start(now);
+        this.oscSecondary.start(now);
+        this.lfoPrimary.start(now);
+
+      } else if (mode === 'PIERCER') {
+        // --- POLICE PIERCER / PHASER (High frequency 9.5 Hz) ---
+        this.oscPrimary = this.ctx.createOscillator();
+        this.oscPrimary.type = 'sawtooth';
+        this.oscPrimary.frequency.setValueAtTime(1250, now);
+
+        this.oscSecondary = this.ctx.createOscillator();
+        this.oscSecondary.type = 'sawtooth';
+        this.oscSecondary.frequency.setValueAtTime(2500, now);
+
+        this.lfoPrimary = this.ctx.createOscillator();
+        this.lfoPrimary.type = 'sawtooth';
+        this.lfoPrimary.frequency.setValueAtTime(9.5, now);
+
+        this.lfoPrimaryGain = this.ctx.createGain();
+        this.lfoPrimaryGain.gain.setValueAtTime(550, now);
+        this.lfoPrimary.connect(this.lfoPrimaryGain);
+        this.lfoPrimaryGain.connect(this.oscPrimary.frequency);
+
+        this.oscPrimary.connect(this.masterGain);
+        this.oscSecondary.connect(this.masterGain);
+
+        this.oscPrimary.start(now);
+        this.oscSecondary.start(now);
+        this.lfoPrimary.start(now);
+
+      } else if (mode === 'HILO') {
+        // --- POLICE HI-LO (European / Tactical Two-Tone 1.6 Hz) ---
+        this.oscPrimary = this.ctx.createOscillator();
+        this.oscPrimary.type = 'square';
+        this.oscPrimary.frequency.setValueAtTime(800, now);
+
+        this.lfoPrimary = this.ctx.createOscillator();
+        this.lfoPrimary.type = 'square';
+        this.lfoPrimary.frequency.setValueAtTime(1.6, now);
+
+        this.lfoPrimaryGain = this.ctx.createGain();
+        this.lfoPrimaryGain.gain.setValueAtTime(140, now); // Toggles 660 Hz & 940 Hz
+        this.lfoPrimary.connect(this.lfoPrimaryGain);
+        this.lfoPrimaryGain.connect(this.oscPrimary.frequency);
+
+        this.oscPrimary.connect(this.masterGain);
+        this.oscPrimary.start(now);
+        this.lfoPrimary.start(now);
+      }
+
+    } catch (e) {
+      console.warn('[Audio] Error starting police siren:', e);
+    }
+  }
+
+  // Stop siren immediately with smooth pop-free decay
   public stopLoudSiren() {
     if (!this.isSirenRunning || !this.ctx) return;
     try {
       this.isSirenRunning = false;
       const now = this.ctx.currentTime;
       if (this.masterGain) {
-        this.masterGain.gain.linearRampToValueAtTime(0.001, now + 0.03);
+        this.masterGain.gain.linearRampToValueAtTime(0.001, now + 0.04);
       }
       setTimeout(() => {
         try {
-          if (this.osc520Hz) { this.osc520Hz.stop(); this.osc520Hz.disconnect(); this.osc520Hz = null; }
-          if (this.oscKlaxon) { this.oscKlaxon.stop(); this.oscKlaxon.disconnect(); this.oscKlaxon = null; }
-          if (this.oscPiercing) { this.oscPiercing.stop(); this.oscPiercing.disconnect(); this.oscPiercing = null; }
-          if (this.oscHarmonic) { this.oscHarmonic.stop(); this.oscHarmonic.disconnect(); this.oscHarmonic = null; }
-          if (this.oscSubBass) { this.oscSubBass.stop(); this.oscSubBass.disconnect(); this.oscSubBass = null; }
+          if (this.oscPrimary) { this.oscPrimary.stop(); this.oscPrimary.disconnect(); this.oscPrimary = null; }
+          if (this.oscSecondary) { this.oscSecondary.stop(); this.oscSecondary.disconnect(); this.oscSecondary = null; }
+          if (this.oscSubHorn) { this.oscSubHorn.stop(); this.oscSubHorn.disconnect(); this.oscSubHorn = null; }
+          if (this.oscTweeter) { this.oscTweeter.stop(); this.oscTweeter.disconnect(); this.oscTweeter = null; }
+          if (this.lfoPrimary) { this.lfoPrimary.stop(); this.lfoPrimary.disconnect(); this.lfoPrimary = null; }
+          if (this.lfoPrimaryGain) { this.lfoPrimaryGain.disconnect(); this.lfoPrimaryGain = null; }
+          if (this.lfoSecondaryGain) { this.lfoSecondaryGain.disconnect(); this.lfoSecondaryGain = null; }
           if (this.lfoFast) { this.lfoFast.stop(); this.lfoFast.disconnect(); this.lfoFast = null; }
           if (this.lfoFastGain) { this.lfoFastGain.disconnect(); this.lfoFastGain = null; }
-          if (this.lfoStutter) { this.lfoStutter.stop(); this.lfoStutter.disconnect(); this.lfoStutter = null; }
-          if (this.lfoStutterGain) { this.lfoStutterGain.disconnect(); this.lfoStutterGain = null; }
           if (this.masterGain) { this.masterGain.disconnect(); this.masterGain = null; }
           if (this.waveShaper) { this.waveShaper.disconnect(); this.waveShaper = null; }
-          if (this.peakFilter1) { this.peakFilter1.disconnect(); this.peakFilter1 = null; }
-          if (this.peakFilter2) { this.peakFilter2.disconnect(); this.peakFilter2 = null; }
+          if (this.hornFilter1) { this.hornFilter1.disconnect(); this.hornFilter1 = null; }
+          if (this.hornFilter2) { this.hornFilter2.disconnect(); this.hornFilter2 = null; }
+          if (this.hornFilter3) { this.hornFilter3.disconnect(); this.hornFilter3 = null; }
           if (this.compressor) { this.compressor.disconnect(); this.compressor = null; }
         } catch (_) {}
-      }, 40);
+      }, 50);
     } catch (e) {
       this.isSirenRunning = false;
     }
   }
 
-  public playTone(type: 'CRITICAL' | 'HIGH' | 'CHIRP') {
+  // Play crisp police alert tones (One-shot)
+  public playTone(type: 'CRITICAL' | 'HIGH' | 'CHIRP' | 'POLICE_BURST' | 'HORN') {
     this.initContext();
     if (!this.ctx) return;
 
@@ -289,34 +421,46 @@ class UltraLoudAlarmEngine {
 
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'peaking';
-      filter.frequency.setValueAtTime(3200, now);
+      filter.frequency.setValueAtTime(3000, now);
       filter.gain.setValueAtTime(14.0, now);
       filter.connect(comp);
 
       osc.connect(gain);
       gain.connect(filter);
 
-      if (type === 'CRITICAL') {
+      if (type === 'CRITICAL' || type === 'POLICE_BURST') {
+        // High-volume police 2-tone sweep burst
         osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(2400, now);
-        osc.frequency.exponentialRampToValueAtTime(3600, now + 0.15);
-        osc.frequency.exponentialRampToValueAtTime(1800, now + 0.35);
-        gain.gain.setValueAtTime(3.5, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.7);
+        osc.frequency.setValueAtTime(750, now);
+        osc.frequency.exponentialRampToValueAtTime(1750, now + 0.22);
+        osc.frequency.exponentialRampToValueAtTime(650, now + 0.50);
+        gain.gain.setValueAtTime(this.currentVolume * 3.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.65);
         osc.start(now);
-        osc.stop(now + 0.7);
+        osc.stop(now + 0.65);
+      } else if (type === 'HORN') {
+        // Heavy emergency vehicle air horn blast
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(440, now);
+        gain.gain.setValueAtTime(this.currentVolume * 3.5, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+        osc.start(now);
+        osc.stop(now + 0.45);
       } else if (type === 'HIGH') {
+        // Rapid tactical police yelp chirp
         osc.type = 'square';
-        osc.frequency.setValueAtTime(2000, now);
-        gain.gain.setValueAtTime(3.0, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+        osc.frequency.setValueAtTime(900, now);
+        osc.frequency.exponentialRampToValueAtTime(1650, now + 0.16);
+        gain.gain.setValueAtTime(this.currentVolume * 2.8, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.30);
         osc.start(now);
-        osc.stop(now + 0.35);
+        osc.stop(now + 0.30);
       } else {
+        // Clean high-tech confirmation chirp
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(1500, now);
+        osc.frequency.setValueAtTime(1400, now);
         osc.frequency.exponentialRampToValueAtTime(2600, now + 0.08);
-        gain.gain.setValueAtTime(1.5, now);
+        gain.gain.setValueAtTime(this.currentVolume * 1.5, now);
         gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
         osc.start(now);
         osc.stop(now + 0.12);
@@ -325,7 +469,7 @@ class UltraLoudAlarmEngine {
   }
 }
 
-export const alarmAudio = new UltraLoudAlarmEngine();
+export const alarmAudio = new PoliceEmergencySirenEngine();
 
 export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [deviceId, setDeviceIdState] = useState<string>(
@@ -676,7 +820,6 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     let areaOn = 0;
     let belongingOn = 0;
-    let autoSiren = 1;
 
     switch (mode) {
       case 'HOME':

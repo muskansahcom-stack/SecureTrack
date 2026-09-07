@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sliders,
   Shield,
@@ -11,6 +11,7 @@ import {
   Save,
   AlertTriangle,
   Play,
+  Square,
   RotateCcw,
   EyeOff,
   Clock,
@@ -18,10 +19,11 @@ import {
   Server,
   Sparkles,
   Zap,
-  Info
+  Info,
+  Siren
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.js';
-import { useDevice, alarmAudio } from '../context/DeviceContext.js';
+import { useDevice, alarmAudio, PoliceSirenMode } from '../context/DeviceContext.js';
 
 export const SettingsScreen: React.FC = () => {
   const { user, logout } = useAuth();
@@ -54,6 +56,34 @@ export const SettingsScreen: React.FC = () => {
   const [notifGps, setNotifGps] = useState<boolean>(settings?.notification_gps !== 0);
 
   const [isSaved, setIsSaved] = useState(false);
+
+  // Police Siren Audio Testing State
+  const [sirenMode, setSirenMode] = useState<PoliceSirenMode>('CRUISER');
+  const [isSirenActive, setIsSirenActive] = useState<boolean>(alarmAudio.isRunning());
+  const [sirenVol, setSirenVol] = useState<number>(85);
+
+  const toggleSirenTest = () => {
+    if (isSirenActive) {
+      alarmAudio.stopLoudSiren();
+      setIsSirenActive(false);
+    } else {
+      alarmAudio.setVolume(sirenVol / 100);
+      alarmAudio.startLoudSiren(sirenMode);
+      setIsSirenActive(true);
+    }
+  };
+
+  const handleModeChange = (mode: PoliceSirenMode) => {
+    setSirenMode(mode);
+    if (isSirenActive) {
+      alarmAudio.startLoudSiren(mode);
+    }
+  };
+
+  const handleVolumeChange = (vol: number) => {
+    setSirenVol(vol);
+    alarmAudio.setVolume(vol / 100);
+  };
 
   const handleSelectPreset = async (preset: 'LOW' | 'MEDIUM' | 'HIGH') => {
     setSensitivityPresetState(preset);
@@ -307,7 +337,126 @@ export const SettingsScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. NOTIFICATIONS */}
+      {/* 4. AUTHENTIC POLICE CRUISER SIREN & ACOUSTIC ENGINE */}
+      <div className="bg-gradient-to-br from-rose-950/40 via-gray-900/90 to-blue-950/40 border border-rose-500/30 rounded-3xl p-5 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <div className={`p-2.5 rounded-2xl border transition ${
+              isSirenActive
+                ? 'bg-rose-600 text-white border-rose-400 shadow-lg shadow-rose-600/40 animate-pulse'
+                : 'bg-rose-600/20 text-rose-400 border-rose-500/30'
+            }`}>
+              <Siren className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center space-x-2">
+                <span>Police Cruiser Siren Engine</span>
+                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                  100W PA Flare
+                </span>
+              </h3>
+              <p className="text-[10px] text-gray-400">Authentic Federal Signal / Whelen multi-mode acoustic synthesis</p>
+            </div>
+          </div>
+          <button
+            onClick={toggleSirenTest}
+            className={`py-2 px-3.5 rounded-xl font-bold text-xs flex items-center space-x-1.5 transition shadow-lg ${
+              isSirenActive
+                ? 'bg-rose-600 hover:bg-rose-700 text-white border border-rose-400 animate-bounce'
+                : 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40'
+            }`}
+          >
+            {isSirenActive ? (
+              <>
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>STOP SIREN</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>TEST POLICE SIREN</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Siren Mode Selector */}
+        <div>
+          <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider block mb-2">
+            Police Siren Acoustic Profile:
+          </span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {[
+              { id: 'CRUISER', name: 'Patrol Cruiser', desc: 'Dual Wail + Yelp Horn' },
+              { id: 'WAIL', name: 'Police Wail', desc: 'Classic 0.25Hz sweep' },
+              { id: 'YELP', name: 'Police Yelp', desc: 'Rapid 3.6Hz pursuit' },
+              { id: 'PIERCER', name: 'Piercer / Phaser', desc: 'Ultra-fast 9.5Hz' },
+              { id: 'HILO', name: 'Hi-Lo Two-Tone', desc: 'Tactical horn 1.6Hz' },
+            ].map((m) => (
+              <button
+                key={m.id}
+                onClick={() => handleModeChange(m.id as PoliceSirenMode)}
+                className={`p-2.5 rounded-xl text-left border transition ${
+                  sirenMode === m.id
+                    ? 'bg-gradient-to-r from-rose-600/30 to-blue-600/30 border-rose-400 text-white shadow-md'
+                    : 'bg-gray-950/80 border-gray-800 text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                <p className="text-xs font-bold text-white">{m.name}</p>
+                <p className="text-[10px] text-gray-400">{m.desc}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Volume & Quick Sound FX Triggers */}
+        <div className="pt-2 border-t border-gray-800/80 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-300 flex items-center space-x-1.5">
+              <Volume2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Siren Speaker Output Volume:</span>
+            </span>
+            <span className="text-xs font-mono font-bold text-rose-400">{sirenVol}%</span>
+          </div>
+          <input
+            type="range"
+            min="10"
+            max="100"
+            value={sirenVol}
+            onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
+            className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
+          />
+
+          {/* Instant Emergency Sound Effects */}
+          <div>
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5">
+              Instant Police Sound Effects (One-Shot):
+            </span>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                onClick={() => alarmAudio.playTone('HORN')}
+                className="py-2 px-2.5 rounded-xl bg-gray-950 hover:bg-gray-800 border border-gray-800 text-amber-300 font-bold text-xs transition flex items-center justify-center space-x-1"
+              >
+                <span>🎺 Air Horn Blast</span>
+              </button>
+              <button
+                onClick={() => alarmAudio.playTone('POLICE_BURST')}
+                className="py-2 px-2.5 rounded-xl bg-gray-950 hover:bg-gray-800 border border-gray-800 text-rose-300 font-bold text-xs transition flex items-center justify-center space-x-1"
+              >
+                <span>🚨 Police Sweep</span>
+              </button>
+              <button
+                onClick={() => alarmAudio.playTone('HIGH')}
+                className="py-2 px-2.5 rounded-xl bg-gray-950 hover:bg-gray-800 border border-gray-800 text-blue-300 font-bold text-xs transition flex items-center justify-center space-x-1"
+              >
+                <span>⚡ Yelp Chirp</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. NOTIFICATIONS */}
       <div className="bg-gray-900/90 border border-gray-800 rounded-3xl p-5 shadow-xl space-y-3">
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400">In-App Notification Preferences</h3>
 
