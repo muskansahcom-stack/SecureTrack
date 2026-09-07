@@ -76,6 +76,7 @@ void loop() {
 
   bool isAreaArmed = mqtt.isAreaSecurityEnabled();
   bool isBelongingArmed = mqtt.isBelongingSecurityEnabled();
+  bool isSystemArmed = isAreaArmed || isBelongingArmed;
   bool isSilent = mqtt.isSilentMode();
 
   // 3. Independent Security Event Detection Logic
@@ -123,7 +124,7 @@ void loop() {
   if (currentMillis - lastTelemetryMillis >= TELEMETRY_INTERVAL_MS) {
     lastTelemetryMillis = currentMillis;
 
-    mqtt.sendTelemetry(mpuData, pirData, gpsData, isArmed, buzzer.isActive());
+    mqtt.sendTelemetry(mpuData, pirData, gpsData, isSystemArmed, buzzer.isActive());
   }
 
   // 5. Periodic Heartbeat Transmission (Every 5000ms)
