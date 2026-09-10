@@ -85,9 +85,9 @@ void loop() {
     Serial.printf("[Security] 🚨 BELONGING MOVEMENT DETECTED! Delta Mag: %.3fg (Threshold: %.2fg) [Silent: %s]\n",
                   mpuData.magnitude, sensors.getMovementThreshold(), isSilent ? "YES" : "NO");
 
-    // Trigger audible alarm pulse only if NOT in silent covert mode
+    // Trigger audible siren immediately on physical buzzer if NOT in silent mode
     if (!isSilent) {
-      buzzer.triggerAlarm(ALARM_MOVEMENT_PULSE, DEFAULT_ALARM_DURATION_MS);
+      buzzer.triggerAlarm(ALARM_INTRUSION_SIREN, DEFAULT_ALARM_DURATION_MS);
     }
 
     // Publish high-priority alert to MQTT

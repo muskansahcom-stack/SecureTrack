@@ -23,7 +23,7 @@
 // 3. MQTT BROKER CONFIGURATION
 // Machine IP running SECUREBELONG Gateway (:1883)
 // ==========================================
-#define MQTT_SERVER         "10.10.26.64"          // Current Local IP of this machine
+#define MQTT_SERVER         "10.10.14.175"         // Current Local IP of this machine
 #define MQTT_PORT           1883
 #define MQTT_USER           ""                     // Leave empty if no auth
 #define MQTT_PASSWORD       ""

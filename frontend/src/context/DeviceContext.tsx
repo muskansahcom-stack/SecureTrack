@@ -609,7 +609,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         setDevice((prev) => (prev ? { ...prev, is_online: 1, last_seen: data.timestamp } : prev));
 
-        if (data.buzzer_active && settings?.silent_mode !== 1) {
+        if ((data.buzzer_active || (data.belonging_security_enabled && data.mpu?.motion_detected) || (data.area_security_enabled && data.pir?.motion)) && settings?.silent_mode !== 1) {
           alarmAudio.startLoudSiren();
         }
 
