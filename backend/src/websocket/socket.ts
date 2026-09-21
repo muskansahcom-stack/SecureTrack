@@ -63,3 +63,15 @@ export function emitCommandAck(deviceId: string, ack: { command: string; success
   if (!io) return;
   io.to(`device:${deviceId}`).emit('device:command_ack', ack);
 }
+
+export function emitAssetUpdate(asset: any): void {
+  if (!io) return;
+  io.emit('asset:update', asset);
+}
+
+export function emitSecurityEvent(event: any): void {
+  if (!io) return;
+  io.to(`device:${event.device_id}`).emit('device:event', event);
+  io.emit('global:event', event);
+}
+

@@ -32,19 +32,19 @@ void setup() {
   delay(1000);
 
   Serial.println("\n=======================================================");
-  Serial.println("🛡️  SECUREBELONG IoT Firmware Initializing...");
-  Serial.printf("📌 Device ID: %s | Firmware: %s\n", DEVICE_ID, FIRMWARE_VERSION);
+  Serial.println("🛡️  SECUREBELONG IoT Production Firmware Starting...");
+  Serial.printf("📌 Device ID: %s | Model: %s | Firmware: %s\n", DEVICE_ID, DEVICE_MODEL, FIRMWARE_VERSION);
   Serial.println("=======================================================");
 
   // 1. Initialize Buzzer & Output Pins
   buzzer.begin();
-  Serial.println("[Init] Buzzer controller ready.");
+  Serial.println("[Init] Buzzer controller ready on GPIO 23.");
 
   // 2. Initialize Sensors (MPU6050 & PIR)
   if (sensors.begin()) {
     Serial.println("[Init] MPU6050 & PIR sensors initialized.");
   } else {
-    Serial.println("[Init] WARNING: MPU6050 not detected. Check I2C wiring.");
+    Serial.println("[Init] WARNING: MPU6050 not detected. Check I2C wiring (SDA->21, SCL->22).");
   }
 
   // 3. Initialize GPS (NEO-6M UART2)
@@ -55,14 +55,14 @@ void setup() {
   mqtt.begin();
   Serial.println("[Init] Network & MQTT subsystem started.");
 
-  // Startup chirp
+  // Startup confirmation chirp
   buzzer.triggerAlarm(ALARM_CHIRP_ARM);
 
   Serial.println("[System] Boot sequence complete. Entering main operational loop.");
 }
 
 void loop() {
-  // 1. Continuous high-frequency updates
+  // 1. Continuous high-frequency non-blocking updates
   gps.update();
   buzzer.update();
   mqtt.update();
@@ -79,29 +79,29 @@ void loop() {
   bool isSystemArmed = isAreaArmed || isBelongingArmed;
   bool isSilent = mqtt.isSilentMode();
 
-  // 3. Independent Security Event Detection Logic
-  // A. MPU6050 Personal Belonging Movement Detection (Only when BELONGING security is ARMED)
+  // 3. CRITICAL: Independent Local Alarm Decision (Zero Cloud Dependency!)
+  // A. MPU6050 Personal Belonging Movement Detection
   if (isBelongingArmed && mpuData.motion_detected) {
-    Serial.printf("[Security] 🚨 BELONGING MOVEMENT DETECTED! Delta Mag: %.3fg (Threshold: %.2fg) [Silent: %s]\n",
+    Serial.printf("[Security] 🚨 ABNORMAL MOVEMENT DETECTED ON PROTECTED ASSET! Delta Mag: %.3fg (Threshold: %.2fg) [Silent: %s]\n",
                   mpuData.magnitude, sensors.getMovementThreshold(), isSilent ? "YES" : "NO");
 
-    // Trigger audible siren immediately on physical buzzer if NOT in silent mode
+    // Local physical siren trigger runs unconditionally on-chip
     if (!isSilent) {
       buzzer.triggerAlarm(ALARM_INTRUSION_SIREN, DEFAULT_ALARM_DURATION_MS);
     }
 
-    // Publish high-priority alert to MQTT
+    // Publish verified security event to MQTT Gateway
     mqtt.sendAlert(
-      "MOTION",
-      isSilent ? "🔕 [Covert] Personal Belonging Moved" : "🚨 Personal Belonging Moved",
-      "Movement detected on protected personal belonging (Magnitude: " + String(mpuData.magnitude, 2) + "g)",
+      "MOTION_DETECTED",
+      isSilent ? "🔕 [Covert] Personal Belonging Moved" : "🚨 Unexpected movement detected",
+      "MPU6050 confirmed abnormal movement on protected personal belonging (Magnitude: " + String(mpuData.magnitude, 2) + "g)",
       "HIGH",
       gpsData.latitude,
       gpsData.longitude
     );
   }
 
-  // B. HC-SR501 Area Intrusion Detection (Only when AREA security is ARMED)
+  // B. HC-SR501 Area Intrusion Detection
   if (isAreaArmed && pirData.motion_detected) {
     Serial.println("[Security] 🚨 AREA INTRUSION DETECTED via HC-SR501 PIR sensor!");
 
@@ -109,9 +109,9 @@ void loop() {
       buzzer.triggerAlarm(ALARM_INTRUSION_SIREN, DEFAULT_ALARM_DURATION_MS);
     }
 
-    // Publish high-priority alert to MQTT
+    // Publish high-priority alert to MQTT Gateway
     mqtt.sendAlert(
-      "INTRUSION",
+      "PIR_INTRUSION",
       isSilent ? "🔕 [Covert] Area Intrusion Detected" : "🚨 Area Intrusion Detected",
       "PIR sensor triggered active human motion in protected area perimeter.",
       "CRITICAL",
@@ -120,17 +120,15 @@ void loop() {
     );
   }
 
-  // 4. Periodic Telemetry Transmission (Every 1000ms)
+  // 4. Periodic Telemetry Transmission (Every 1000ms when connected)
   if (currentMillis - lastTelemetryMillis >= TELEMETRY_INTERVAL_MS) {
     lastTelemetryMillis = currentMillis;
-
     mqtt.sendTelemetry(mpuData, pirData, gpsData, isSystemArmed, buzzer.isActive());
   }
 
-  // 5. Periodic Heartbeat Transmission (Every 5000ms)
+  // 5. Periodic Heartbeat Transmission (Every 5000ms when connected)
   if (currentMillis - lastHeartbeatMillis >= HEARTBEAT_INTERVAL_MS) {
     lastHeartbeatMillis = currentMillis;
-
     mqtt.sendHeartbeat();
   }
 

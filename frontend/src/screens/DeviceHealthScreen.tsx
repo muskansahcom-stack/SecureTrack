@@ -33,9 +33,10 @@ export const DeviceHealthScreen: React.FC = () => {
     isTestMode,
   } = useDevice();
 
-  const wifiRssi = telemetry?.wifi_rssi ?? device?.wifi_rssi ?? -54;
+  const wifiRssi = telemetry?.wifi_rssi ?? (isEsp32Connected ? device?.wifi_rssi ?? null : null);
 
-  const getSignalStrength = (rssi: number) => {
+  const getSignalStrength = (rssi: number | null) => {
+    if (rssi === null) return { label: 'Offline', color: 'text-gray-500', badge: 'bg-gray-800 text-gray-400 border-gray-700' };
     if (rssi > -60) return { label: 'Excellent', color: 'text-emerald-400', badge: 'bg-emerald-950/80 text-emerald-400 border-emerald-500/30' };
     if (rssi > -70) return { label: 'Good', color: 'text-blue-400', badge: 'bg-blue-950/80 text-blue-400 border-blue-500/30' };
     if (rssi > -80) return { label: 'Fair', color: 'text-amber-400', badge: 'bg-amber-950/80 text-amber-400 border-amber-500/30' };
@@ -59,6 +60,18 @@ export const DeviceHealthScreen: React.FC = () => {
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
+
+      {!isEsp32Connected && !isTestMode && (
+        <div className="p-4 rounded-3xl bg-rose-950/70 border border-rose-500/50 flex items-start space-x-3">
+          <AlertTriangle className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+          <div className="text-xs">
+            <h4 className="font-bold text-rose-200">REAL HARDWARE NOT CONNECTED</h4>
+            <p className="text-rose-300/80 mt-0.5">
+              Target ESP32 (<span className="font-mono">{deviceId}</span>) is offline. Power on your physical ESP32 module with Wi-Fi configured to stream telemetry.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* 1. Master Hardware Health Card */}
       <div className="bg-gray-900/90 border border-gray-800 rounded-3xl p-5 shadow-xl space-y-4">
@@ -107,7 +120,7 @@ export const DeviceHealthScreen: React.FC = () => {
               <span>LATENCY</span>
             </div>
             <p className="text-sm font-mono font-bold text-emerald-400 mt-1">
-              {serverLatencyMs > 0 ? `${serverLatencyMs}ms` : '< 5ms'}
+              {isEsp32Connected ? (serverLatencyMs > 0 ? `${serverLatencyMs}ms` : '< 5ms') : '--'}
             </p>
           </div>
 
@@ -117,7 +130,9 @@ export const DeviceHealthScreen: React.FC = () => {
               <span>UPTIME</span>
             </div>
             <p className="text-sm font-mono font-bold text-white mt-1">
-              {telemetry?.uptime_sec ? `${Math.floor(telemetry.uptime_sec / 60)}m ${telemetry.uptime_sec % 60}s` : '1h 12m'}
+              {isEsp32Connected && telemetry?.uptime_sec !== undefined
+                ? `${Math.floor(telemetry.uptime_sec / 60)}m ${telemetry.uptime_sec % 60}s`
+                : '--'}
             </p>
           </div>
 
@@ -127,7 +142,9 @@ export const DeviceHealthScreen: React.FC = () => {
               <span>FREE HEAP</span>
             </div>
             <p className="text-sm font-mono font-bold text-cyan-400 mt-1">
-              {telemetry?.free_heap ? `${Math.round(telemetry.free_heap / 1024)} KB` : '182 KB'}
+              {isEsp32Connected && telemetry?.free_heap
+                ? `${Math.round(telemetry.free_heap / 1024)} KB`
+                : '--'}
             </p>
           </div>
         </div>

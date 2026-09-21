@@ -28,11 +28,11 @@ const AREA_PRESETS = [
 
 export const DeviceSetupScreen: React.FC<DeviceSetupScreenProps> = ({ onComplete }) => {
   const { user } = useAuth();
-  const { deviceId, setDeviceId, deviceName, setDeviceName, isEsp32Connected, isSocketConnected, refreshData } = useDevice();
+  const { deviceId, setDeviceId, deviceName, setDeviceName, isEsp32Connected, isSocketConnected, refreshData, pairDeviceAsset } = useDevice();
   
-  const [inputDeviceId, setInputDeviceId] = useState(deviceId);
-  const [selectedBelonging, setSelectedBelonging] = useState('Laptop Bag');
-  const [customBelonging, setCustomBelonging] = useState('My Laptop Bag');
+  const [inputDeviceId, setInputDeviceId] = useState(deviceId || 'ESP32-SECURITY-001');
+  const [selectedBelonging, setSelectedBelonging] = useState('My Laptop');
+  const [customBelonging, setCustomBelonging] = useState('My Laptop');
   const [selectedArea, setSelectedArea] = useState('Hostel Room');
   const [customArea, setCustomArea] = useState('My Hostel Room');
   
@@ -44,28 +44,30 @@ export const DeviceSetupScreen: React.FC<DeviceSetupScreenProps> = ({ onComplete
     setIsSaving(true);
     setSuccessMsg(null);
 
-    const finalBelonging = customBelonging.trim() || selectedBelonging;
-    const finalArea = customArea.trim() || selectedArea;
+    const targetDevId = inputDeviceId.trim() || 'ESP32-SECURITY-001';
+    const finalBelonging = customBelonging.trim() || selectedBelonging || 'My Laptop';
+    const finalArea = customArea.trim() || selectedArea || 'My Hostel Room';
 
     try {
-      setDeviceId(inputDeviceId);
+      setDeviceId(targetDevId);
       setDeviceName(`Security Unit (${finalBelonging})`);
 
       await api.registerDevice({
-        device_id: inputDeviceId,
+        device_id: targetDevId,
         device_name: `Security Unit (${finalBelonging})`,
         user_id: user?.id || 'usr_muskan',
         area_name: finalArea,
         belonging_name: finalBelonging,
       });
 
+      await pairDeviceAsset(targetDevId, finalBelonging, 'LAPTOP', 'BELONGING');
       await refreshData();
-      setSuccessMsg('Security device and personal items configured!');
+      setSuccessMsg(`Paired ${targetDevId} with "${finalBelonging}" successfully!`);
       setTimeout(() => {
         onComplete();
       }, 800);
     } catch (err: any) {
-      setSuccessMsg('Saved and synced with personal dashboard.');
+      setSuccessMsg(`Paired ${targetDevId} with "${finalBelonging}".`);
       setTimeout(() => {
         onComplete();
       }, 800);

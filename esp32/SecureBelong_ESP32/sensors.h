@@ -49,6 +49,8 @@ private:
   bool mpuEnabled;
   unsigned long lastPIRTriggerTime;
   unsigned long lastMPUTriggerTime;
+  int consecutiveExceedCount;
+  unsigned long lastExceedTime;
 };
 
 #endif // SENSORS_H

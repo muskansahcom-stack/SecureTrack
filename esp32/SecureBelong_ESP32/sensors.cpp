@@ -7,7 +7,9 @@ SensorManager::SensorManager()
     pirEnabled(true),
     mpuEnabled(true),
     lastPIRTriggerTime(0),
-    lastMPUTriggerTime(0) {}
+    lastMPUTriggerTime(0),
+    consecutiveExceedCount(0),
+    lastExceedTime(0) {}
 
 bool SensorManager::begin() {
   // Initialize I2C bus on GPIO21 (SDA) and GPIO22 (SCL)
@@ -58,7 +60,6 @@ MPUReadings SensorManager::readMPU() {
 
   sensors_event_t a, g, temp;
   if (!mpu.getEvent(&a, &g, &temp)) {
-    Serial.println("[Sensors] Error reading MPU6050 events.");
     return data;
   }
 
@@ -80,12 +81,28 @@ MPUReadings SensorManager::readMPU() {
   // Delta from static gravity (1.0g)
   data.magnitude = fabsf(totalAccel - 1.0f);
 
-  // Check threshold and debounce
+  unsigned long now = millis();
+
+  // Multi-sample confirmation window to filter out solitary vibration noise spikes
   if (data.magnitude > movementThreshold) {
-    unsigned long now = millis();
-    if (now - lastMPUTriggerTime >= MPU_COOLDOWN_MS) {
+    if (now - lastExceedTime <= 300) {
+      consecutiveExceedCount++;
+    } else {
+      consecutiveExceedCount = 1;
+    }
+    lastExceedTime = now;
+
+    // Trigger only when confirmed by consecutive samples OR by strong intentional displacement (> 2x threshold)
+    bool isConfirmed = (consecutiveExceedCount >= MPU_CONFIRM_SAMPLES) || (data.magnitude >= movementThreshold * 2.0f);
+
+    if (isConfirmed && (now - lastMPUTriggerTime >= MPU_COOLDOWN_MS)) {
       data.motion_detected = true;
       lastMPUTriggerTime = now;
+      consecutiveExceedCount = 0;
+    }
+  } else {
+    if (now - lastExceedTime > 400) {
+      consecutiveExceedCount = 0;
     }
   }
 

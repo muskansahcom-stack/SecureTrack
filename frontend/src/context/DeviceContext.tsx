@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { io, Socket } from 'socket.io-client';
 import {
   Device,
+  ProtectedAsset,
   DeviceSettings,
   Telemetry,
   Alert,
@@ -10,8 +11,11 @@ import {
   SecurityModeType,
   CommandAuditItem,
   SensorHealthStatus,
+  SecurityEvent
 } from '../types/index.js';
 import { api, API_BASE_URL } from '../api/client.js';
+
+export type PoliceSirenMode = 'CRUISER' | 'WAIL' | 'YELP' | 'PIERCER' | 'HILO';
 
 interface DeviceContextType {
   deviceId: string;
@@ -21,8 +25,10 @@ interface DeviceContextType {
   isTestMode: boolean;
   setTestMode: (enabled: boolean) => void;
 
-  // Real-time telemetry & entity state
+  // Real Hardware & Protected Assets
   device: Device | null;
+  assets: ProtectedAsset[];
+  activeAsset: ProtectedAsset | null;
   settings: DeviceSettings | null;
   telemetry: Telemetry | null;
   alerts: Alert[];
@@ -31,20 +37,29 @@ interface DeviceContextType {
   setActiveAlert: (a: Alert | null) => void;
   routeHistory: GPSPoint[];
 
-  // Security mode & status
+  // Real Hardware Security & Health
   currentSecurityMode: SecurityModeType;
   securityScore: number;
   sensorHealth: SensorHealthStatus;
   isAreaActive: boolean;
   isBelongingActive: boolean;
+  isArmed: boolean;
 
-  // Connection & Diagnostics
+  // Real Connection & Diagnostics
   isSocketConnected: boolean;
   isEsp32Connected: boolean;
   lastHeartbeatAgeSec: number;
   serverLatencyMs: number;
   latestCommandStatus: CommandAuditItem | null;
   commandHistory: CommandAuditItem[];
+
+  // Protected Asset & Hardware Controls
+  pairDeviceAsset: (deviceId: string, assetName: string, assetType?: string, protectionMode?: string) => Promise<void>;
+  armAsset: (assetId: string) => Promise<void>;
+  disarmAsset: (assetId: string) => Promise<void>;
+  armProtection: () => Promise<void>;
+  disarmProtection: () => Promise<void>;
+  stopSiren: () => Promise<void>;
 
   // Security Mode Presets
   setSecurityMode: (mode: SecurityModeType) => Promise<void>;
@@ -56,7 +71,7 @@ interface DeviceContextType {
   turnOffBelongingSecurity: () => Promise<void>;
   updateCustomNames: (areaName: string, belongingName: string) => Promise<void>;
 
-  // Hardware Deterrent & Alarm Controls
+  // Hardware Controls
   armSystem: () => Promise<void>;
   disarmSystem: () => Promise<void>;
   activateBuzzer: () => Promise<void>;
@@ -83,28 +98,18 @@ const DeviceContext = createContext<DeviceContextType | undefined>(undefined);
 
 // ============================================================================
 // AUTHENTIC POLICE CRUISER SIREN & EMERGENCY ACOUSTIC SYNTHESIZER
-// Modeled after authentic Federal Signal / Whelen electronic emergency vehicle sirens:
-// 1. Authentic Police Wail: 550 Hz - 1600 Hz smooth undulating continuous sweep (0.26 Hz)
-// 2. Tactical Police Yelp: 650 Hz - 1650 Hz rapid cycling emergency pursuit (3.6 Hz)
-// 3. Ultra Piercer / Phaser: 750 Hz - 1800 Hz high-frequency warning (9.5 Hz)
-// 4. European / Tactical Hi-Lo: Dual-tone alternating horn (680 Hz / 940 Hz)
-// 5. Dual Cruiser Siren: Wail + Harmonized Horn resonance + Yelp subharmonic
 // ============================================================================
-export type PoliceSirenMode = 'CRUISER' | 'WAIL' | 'YELP' | 'PIERCER' | 'HILO';
-
 class PoliceEmergencySirenEngine {
   private ctx: AudioContext | null = null;
   private isSirenRunning: boolean = false;
   private currentMode: PoliceSirenMode = 'CRUISER';
   private currentVolume: number = 0.85;
 
-  // Primary & Harmonic Oscillators
   private oscPrimary: OscillatorNode | null = null;
   private oscSecondary: OscillatorNode | null = null;
   private oscSubHorn: OscillatorNode | null = null;
   private oscTweeter: OscillatorNode | null = null;
 
-  // Siren Modulation LFOs
   private lfoPrimary: OscillatorNode | null = null;
   private lfoPrimaryGain: GainNode | null = null;
   private lfoSecondaryGain: GainNode | null = null;
@@ -112,7 +117,6 @@ class PoliceEmergencySirenEngine {
   private lfoFast: OscillatorNode | null = null;
   private lfoFastGain: GainNode | null = null;
 
-  // Signal Processing & Formant Modeling
   private masterGain: GainNode | null = null;
   private hornFilter1: BiquadFilterNode | null = null;
   private hornFilter2: BiquadFilterNode | null = null;
@@ -132,7 +136,6 @@ class PoliceEmergencySirenEngine {
     }
   }
 
-  // Generate realistic emergency speaker horn saturation curve
   private makeHornCurve(amount: number = 18) {
     const k = amount;
     const n_samples = 44100;
@@ -174,7 +177,6 @@ class PoliceEmergencySirenEngine {
     }
   }
 
-  // Start continuous authentic Police Siren
   public startLoudSiren(mode: PoliceSirenMode = 'CRUISER') {
     this.initContext();
     if (!this.ctx) return;
@@ -188,7 +190,6 @@ class PoliceEmergencySirenEngine {
       this.currentMode = mode;
       const now = this.ctx.currentTime;
 
-      // 1. Dynamics Compressor (Prevents speaker clipping while maximizing acoustic punch)
       this.compressor = this.ctx.createDynamicsCompressor();
       this.compressor.threshold.setValueAtTime(-20, now);
       this.compressor.knee.setValueAtTime(4, now);
@@ -197,7 +198,6 @@ class PoliceEmergencySirenEngine {
       this.compressor.release.setValueAtTime(0.05, now);
       this.compressor.connect(this.ctx.destination);
 
-      // 2. Siren Horn Resonance Formant Filters (100W Speaker Bell Flare Simulation)
       this.hornFilter1 = this.ctx.createBiquadFilter();
       this.hornFilter1.type = 'peaking';
       this.hornFilter1.frequency.setValueAtTime(2800, now);
@@ -218,48 +218,39 @@ class PoliceEmergencySirenEngine {
       this.hornFilter3.Q.setValueAtTime(0.7, now);
       this.hornFilter3.connect(this.hornFilter2);
 
-      // 3. Siren Horn Overdrive WaveShaper (Adds authentic emergency vehicle acoustic bite)
       this.waveShaper = this.ctx.createWaveShaper();
       this.waveShaper.curve = this.makeHornCurve(16);
       this.waveShaper.oversample = '4x';
       this.waveShaper.connect(this.hornFilter3);
 
-      // 4. Master Volume Gain
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.setValueAtTime(0.01, now);
       this.masterGain.gain.linearRampToValueAtTime(this.currentVolume * 2.8, now + 0.08);
       this.masterGain.connect(this.waveShaper);
 
-      // Configure based on selected siren mode
       if (mode === 'WAIL' || mode === 'CRUISER') {
-        // --- POLICE WAIL MODE ---
-        // Primary Sawtooth Carrier (Center: 1050 Hz)
         this.oscPrimary = this.ctx.createOscillator();
         this.oscPrimary.type = 'sawtooth';
         this.oscPrimary.frequency.setValueAtTime(1050, now);
 
-        // Secondary Square Carrier with slight detune for authentic chorused acoustic body
         this.oscSecondary = this.ctx.createOscillator();
         this.oscSecondary.type = 'square';
         this.oscSecondary.frequency.setValueAtTime(1058, now);
 
-        // Sub-Horn Resonator (260 Hz)
         this.oscSubHorn = this.ctx.createOscillator();
         this.oscSubHorn.type = 'triangle';
         this.oscSubHorn.frequency.setValueAtTime(260, now);
 
-        // Piercing Overtone (3150 Hz)
         this.oscTweeter = this.ctx.createOscillator();
         this.oscTweeter.type = 'sawtooth';
         this.oscTweeter.frequency.setValueAtTime(3150, now);
 
-        // Main Wail LFO: Smooth 0.25 Hz undulating rise & fall (550 Hz - 1550 Hz)
         this.lfoPrimary = this.ctx.createOscillator();
         this.lfoPrimary.type = 'triangle';
         this.lfoPrimary.frequency.setValueAtTime(0.25, now);
 
         this.lfoPrimaryGain = this.ctx.createGain();
-        this.lfoPrimaryGain.gain.setValueAtTime(500, now); // Sweeps 550 Hz to 1550 Hz
+        this.lfoPrimaryGain.gain.setValueAtTime(500, now);
         this.lfoPrimary.connect(this.lfoPrimaryGain);
         this.lfoPrimaryGain.connect(this.oscPrimary.frequency);
 
@@ -270,7 +261,6 @@ class PoliceEmergencySirenEngine {
         this.lfoSecondaryGain.connect(this.oscTweeter.frequency);
 
         if (mode === 'CRUISER') {
-          // Add layered tactical fast pulse undertone
           this.lfoFast = this.ctx.createOscillator();
           this.lfoFast.type = 'sawtooth';
           this.lfoFast.frequency.setValueAtTime(3.6, now);
@@ -292,9 +282,7 @@ class PoliceEmergencySirenEngine {
         this.oscSubHorn.start(now);
         this.oscTweeter.start(now);
         this.lfoPrimary.start(now);
-
       } else if (mode === 'YELP') {
-        // --- POLICE YELP MODE (Rapid tactical sweep 3.6 Hz) ---
         this.oscPrimary = this.ctx.createOscillator();
         this.oscPrimary.type = 'sawtooth';
         this.oscPrimary.frequency.setValueAtTime(1150, now);
@@ -305,10 +293,10 @@ class PoliceEmergencySirenEngine {
 
         this.lfoPrimary = this.ctx.createOscillator();
         this.lfoPrimary.type = 'sawtooth';
-        this.lfoPrimary.frequency.setValueAtTime(3.6, now); // ~216 cycles/min
+        this.lfoPrimary.frequency.setValueAtTime(3.6, now);
 
         this.lfoPrimaryGain = this.ctx.createGain();
-        this.lfoPrimaryGain.gain.setValueAtTime(500, now); // 650 Hz to 1650 Hz
+        this.lfoPrimaryGain.gain.setValueAtTime(500, now);
         this.lfoPrimary.connect(this.lfoPrimaryGain);
         this.lfoPrimaryGain.connect(this.oscPrimary.frequency);
         this.lfoPrimaryGain.connect(this.oscSecondary.frequency);
@@ -319,9 +307,7 @@ class PoliceEmergencySirenEngine {
         this.oscPrimary.start(now);
         this.oscSecondary.start(now);
         this.lfoPrimary.start(now);
-
       } else if (mode === 'PIERCER') {
-        // --- POLICE PIERCER / PHASER (High frequency 9.5 Hz) ---
         this.oscPrimary = this.ctx.createOscillator();
         this.oscPrimary.type = 'sawtooth';
         this.oscPrimary.frequency.setValueAtTime(1250, now);
@@ -345,9 +331,7 @@ class PoliceEmergencySirenEngine {
         this.oscPrimary.start(now);
         this.oscSecondary.start(now);
         this.lfoPrimary.start(now);
-
       } else if (mode === 'HILO') {
-        // --- POLICE HI-LO (European / Tactical Two-Tone 1.6 Hz) ---
         this.oscPrimary = this.ctx.createOscillator();
         this.oscPrimary.type = 'square';
         this.oscPrimary.frequency.setValueAtTime(800, now);
@@ -357,7 +341,7 @@ class PoliceEmergencySirenEngine {
         this.lfoPrimary.frequency.setValueAtTime(1.6, now);
 
         this.lfoPrimaryGain = this.ctx.createGain();
-        this.lfoPrimaryGain.gain.setValueAtTime(140, now); // Toggles 660 Hz & 940 Hz
+        this.lfoPrimaryGain.gain.setValueAtTime(140, now);
         this.lfoPrimary.connect(this.lfoPrimaryGain);
         this.lfoPrimaryGain.connect(this.oscPrimary.frequency);
 
@@ -365,13 +349,11 @@ class PoliceEmergencySirenEngine {
         this.oscPrimary.start(now);
         this.lfoPrimary.start(now);
       }
-
     } catch (e) {
       console.warn('[Audio] Error starting police siren:', e);
     }
   }
 
-  // Stop siren immediately with smooth pop-free decay
   public stopLoudSiren() {
     if (!this.isSirenRunning || !this.ctx) return;
     try {
@@ -404,7 +386,6 @@ class PoliceEmergencySirenEngine {
     }
   }
 
-  // Play crisp police alert tones (One-shot)
   public playTone(type: 'CRITICAL' | 'HIGH' | 'CHIRP' | 'POLICE_BURST' | 'HORN') {
     this.initContext();
     if (!this.ctx) return;
@@ -429,7 +410,6 @@ class PoliceEmergencySirenEngine {
       gain.connect(filter);
 
       if (type === 'CRITICAL' || type === 'POLICE_BURST') {
-        // High-volume police 2-tone sweep burst
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(750, now);
         osc.frequency.exponentialRampToValueAtTime(1750, now + 0.22);
@@ -439,7 +419,6 @@ class PoliceEmergencySirenEngine {
         osc.start(now);
         osc.stop(now + 0.65);
       } else if (type === 'HORN') {
-        // Heavy emergency vehicle air horn blast
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(440, now);
         gain.gain.setValueAtTime(this.currentVolume * 3.5, now);
@@ -447,7 +426,6 @@ class PoliceEmergencySirenEngine {
         osc.start(now);
         osc.stop(now + 0.45);
       } else if (type === 'HIGH') {
-        // Rapid tactical police yelp chirp
         osc.type = 'square';
         osc.frequency.setValueAtTime(900, now);
         osc.frequency.exponentialRampToValueAtTime(1650, now + 0.16);
@@ -456,7 +434,6 @@ class PoliceEmergencySirenEngine {
         osc.start(now);
         osc.stop(now + 0.30);
       } else {
-        // Clean high-tech confirmation chirp
         osc.type = 'sine';
         osc.frequency.setValueAtTime(1400, now);
         osc.frequency.exponentialRampToValueAtTime(2600, now + 0.08);
@@ -478,11 +455,11 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [deviceName, setDeviceNameState] = useState<string>(
     localStorage.getItem('securebelong_device_name') || 'Personal Belonging Unit 1'
   );
-  const [isTestMode, setIsTestModeState] = useState<boolean>(
-    localStorage.getItem('securebelong_test_mode') === 'true'
-  );
+  const [isTestMode, setIsTestModeState] = useState<boolean>(false);
 
   const [device, setDevice] = useState<Device | null>(null);
+  const [assets, setAssets] = useState<ProtectedAsset[]>([]);
+  const [activeAsset, setActiveAsset] = useState<ProtectedAsset | null>(null);
   const [settings, setSettings] = useState<DeviceSettings | null>(null);
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -498,10 +475,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [commandHistory, setCommandHistory] = useState<CommandAuditItem[]>([]);
 
   const socketRef = useRef<Socket | null>(null);
-  const lastHeartbeatTimeRef = useRef<number>(Date.now());
-  const lastMpuTimeRef = useRef<number>(Date.now());
-  const lastPirTimeRef = useRef<number>(Date.now());
-  const lastGpsTimeRef = useRef<number>(Date.now());
+  const lastHeartbeatTimeRef = useRef<number>(0);
+  const lastMpuTimeRef = useRef<number>(0);
 
   const setDeviceId = (id: string) => {
     setDeviceIdState(id);
@@ -515,10 +490,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const setTestMode = (enabled: boolean) => {
     setIsTestModeState(enabled);
-    localStorage.setItem('securebelong_test_mode', enabled ? 'true' : 'false');
   };
 
-  // Helper to record & update command status audit trail
   const trackCommand = (cmdName: string, status: 'SENDING' | 'SENT' | 'ACKNOWLEDGED' | 'FAILED', msg?: string) => {
     const item: CommandAuditItem = {
       id: `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -537,8 +510,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const refreshData = useCallback(async () => {
     try {
       const startTime = Date.now();
-      const [statusRes, alertsRes, eventsRes, settingsRes, routeRes] = await Promise.allSettled([
+      const [statusRes, assetsRes, alertsRes, eventsRes, settingsRes, routeRes] = await Promise.allSettled([
         api.getDeviceStatus(deviceId),
+        api.getProtectedAssets(),
         api.getAlerts(deviceId),
         api.getEvents(deviceId),
         api.getDeviceSettings(deviceId),
@@ -549,23 +523,32 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       if (statusRes.status === 'fulfilled' && statusRes.value.data) {
         setDevice(statusRes.value.data.device);
-        if (statusRes.value.data.latestTelemetry && !isTestMode) {
+        if (statusRes.value.data.latestTelemetry) {
           setTelemetry(statusRes.value.data.latestTelemetry);
         }
         if (statusRes.value.data.device?.last_seen) {
-          lastHeartbeatTimeRef.current = new Date(statusRes.value.data.device.last_seen).getTime();
+          const lastSeenMs = new Date(statusRes.value.data.device.last_seen).getTime();
+          lastHeartbeatTimeRef.current = lastSeenMs;
+          const age = Math.max(0, Math.floor((Date.now() - lastSeenMs) / 1000));
+          setLastHeartbeatAgeSec(age);
         }
+      }
+
+      if (assetsRes.status === 'fulfilled' && Array.isArray(assetsRes.value.data)) {
+        setAssets(assetsRes.value.data);
+        const match = assetsRes.value.data.find((a: ProtectedAsset) => a.device_id === deviceId);
+        setActiveAsset(match || assetsRes.value.data[0] || null);
       }
 
       if (settingsRes.status === 'fulfilled' && settingsRes.value.data) {
         setSettings(settingsRes.value.data);
       }
 
-      if (alertsRes.status === 'fulfilled' && alertsRes.value.data) {
+      if (alertsRes.status === 'fulfilled' && Array.isArray(alertsRes.value.data)) {
         setAlerts(alertsRes.value.data);
       }
 
-      if (eventsRes.status === 'fulfilled' && eventsRes.value.data) {
+      if (eventsRes.status === 'fulfilled' && Array.isArray(eventsRes.value.data)) {
         setEvents(eventsRes.value.data);
       }
 
@@ -575,9 +558,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     } catch (err) {
       console.warn('Error fetching device data:', err);
     }
-  }, [deviceId, isTestMode]);
+  }, [deviceId]);
 
-  // WebSocket Connection
+  // Real Hardware WebSocket Connection
   useEffect(() => {
     const socket = io(API_BASE_URL, {
       transports: ['websocket', 'polling'],
@@ -598,15 +581,14 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setIsSocketConnected(false);
     });
 
+    // Real-Time Telemetry Stream from Hardware
     socket.on('device:telemetry', (data: Telemetry) => {
-      if (data.device_id === deviceId && !isTestMode) {
+      if (data.device_id === deviceId) {
         setTelemetry(data);
         lastHeartbeatTimeRef.current = Date.now();
         lastMpuTimeRef.current = Date.now();
-        lastPirTimeRef.current = Date.now();
-        if (data.gps?.valid) {
-          lastGpsTimeRef.current = Date.now();
-        }
+        setLastHeartbeatAgeSec(0);
+
         setDevice((prev) => (prev ? { ...prev, is_online: 1, last_seen: data.timestamp } : prev));
 
         if ((data.buzzer_active || (data.belonging_security_enabled && data.mpu?.motion_detected) || (data.area_security_enabled && data.pir?.motion)) && settings?.silent_mode !== 1) {
@@ -632,6 +614,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     });
 
+    // Real Security Alerts & Movement Events
     socket.on('device:alert', (alert: Alert) => {
       if (alert.device_id === deviceId) {
         setAlerts((prev) => [alert, ...prev.filter((a) => a.id !== alert.id)]);
@@ -649,7 +632,18 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setDevice((prev) => (prev ? { ...prev, ...statusUpdate } : (statusUpdate as Device)));
         if (statusUpdate.last_seen) {
           lastHeartbeatTimeRef.current = new Date(statusUpdate.last_seen).getTime();
+          setLastHeartbeatAgeSec(0);
         }
+      }
+    });
+
+    socket.on('asset:update', (updatedAsset: ProtectedAsset) => {
+      setAssets((prev) => {
+        const filtered = prev.filter((a) => a.id !== updatedAsset.id);
+        return [updatedAsset, ...filtered];
+      });
+      if (activeAsset?.id === updatedAsset.id || updatedAsset.device_id === deviceId) {
+        setActiveAsset(updatedAsset);
       }
     });
 
@@ -665,348 +659,231 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       socket.disconnect();
     };
-  }, [deviceId, isTestMode, refreshData]);
+  }, [deviceId, refreshData, settings?.silent_mode, activeAsset?.id, latestCommandStatus]);
 
   // Initial load
   useEffect(() => {
     refreshData();
   }, [refreshData]);
 
-  // Heartbeat age counter
+  // Real Heartbeat Age Monitor
   useEffect(() => {
     const interval = setInterval(() => {
-      const elapsedSec = Math.max(0, Math.floor((Date.now() - lastHeartbeatTimeRef.current) / 1000));
-      setLastHeartbeatAgeSec(elapsedSec);
+      if (lastHeartbeatTimeRef.current > 0) {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - lastHeartbeatTimeRef.current) / 1000));
+        setLastHeartbeatAgeSec(elapsedSec);
+      }
     }, 1000);
 
     return () => clearInterval(interval);
   }, []);
 
-  // TEST / SIMULATION MODE GENERATOR
-  useEffect(() => {
-    if (!isTestMode) return;
+  // Strict Real Hardware Connectivity (Zero Fake Fallback)
+  const isEsp32Connected = Boolean(
+    device?.is_online === 1 &&
+    lastHeartbeatTimeRef.current > 0 &&
+    (Date.now() - lastHeartbeatTimeRef.current) < 15000
+  );
 
-    console.log('[Simulation] Test mode active. Generating simulated sensor stream.');
-    const simInterval = setInterval(() => {
-      const isArmed = device?.is_armed === 1;
-      const baseAccel = 1.0;
-      const noise = (Math.random() - 0.5) * 0.04;
-      const simMagnitude = Math.abs(noise);
+  const isAreaActive = settings?.area_security_enabled === 1 || telemetry?.area_security_enabled === true;
+  const isBelongingActive = activeAsset?.armed === 1 || activeAsset?.armed === true || settings?.belonging_security_enabled === 1 || telemetry?.belonging_security_enabled === true;
+  const isArmed = isBelongingActive || isAreaActive;
 
-      setTelemetry({
-        device_id: deviceId,
-        timestamp: new Date().toISOString(),
-        mpu: {
-          accel_x: parseFloat(((Math.random() - 0.5) * 0.08).toFixed(3)),
-          accel_y: parseFloat(((Math.random() - 0.5) * 0.08).toFixed(3)),
-          accel_z: parseFloat((baseAccel + noise).toFixed(3)),
-          gyro_x: parseFloat(((Math.random() - 0.5) * 2.0).toFixed(2)),
-          gyro_y: parseFloat(((Math.random() - 0.5) * 2.0).toFixed(2)),
-          gyro_z: parseFloat(((Math.random() - 0.5) * 2.0).toFixed(2)),
-          magnitude: parseFloat(simMagnitude.toFixed(3)),
-          motion_detected: simMagnitude > 0.3,
-          intensity: simMagnitude > 0.6 ? 'HIGH' : simMagnitude > 0.3 ? 'MEDIUM' : 'LOW',
-          movement_status: simMagnitude > 0.6 ? 'HIGH MOVEMENT' : simMagnitude > 0.3 ? 'MOVEMENT' : 'NORMAL',
-        },
-        pir: {
-          motion: false,
-          raw_val: 0,
-          detection_count: 3,
-          last_detected: new Date(Date.now() - 300000).toISOString(),
-        },
-        gps: {
-          latitude: 28.613939,
-          longitude: 77.209021,
-          valid: true,
-          satellites: 9,
-          altitude: 216.5,
-          speed: 0.0,
-          last_update: new Date().toISOString(),
-        },
-        buzzer_active: false,
-        system_armed: isArmed,
-        free_heap: 182400,
-        uptime_sec: 3600,
-        wifi_rssi: -54,
+  // Real Protected Asset Controls
+  const pairDeviceAsset = async (devUid: string, assetName: string, assetType = 'LAPTOP', protectionMode = 'PERSONAL_BELONGING') => {
+    trackCommand('PAIR_DEVICE_ASSET', 'SENDING', `Pairing ${devUid} with ${assetName}`);
+    try {
+      const res = await api.pairDeviceAsset({
+        device_id: devUid,
+        asset_name: assetName,
+        asset_type: assetType,
+        protection_mode: protectionMode,
       });
+      setDeviceId(devUid);
+      setDeviceName(`Security Unit (${assetName})`);
+      if (res.data?.asset) {
+        setActiveAsset(res.data.asset);
+      }
+      await refreshData();
+      trackCommand('PAIR_DEVICE_ASSET', 'ACKNOWLEDGED', 'Device paired successfully');
+    } catch (err: any) {
+      trackCommand('PAIR_DEVICE_ASSET', 'FAILED', err.message);
+      throw err;
+    }
+  };
 
-      setDevice((prev) =>
-        prev
-          ? { ...prev, is_online: 1, last_seen: new Date().toISOString() }
-          : {
-              id: 'sim_dev',
-              device_id: deviceId,
-              device_name: 'Simulated ESP32 Test Rig',
-              user_id: 'usr_test',
-              is_online: 1,
-              is_armed: isArmed ? 1 : 0,
-              last_seen: new Date().toISOString(),
-              firmware_version: 'v1.0.0-TEST',
-              wifi_rssi: -54,
-              created_at: new Date().toISOString(),
-            }
-      );
-      lastHeartbeatTimeRef.current = Date.now();
-    }, 1000);
+  const armAsset = async (assetId: string) => {
+    trackCommand('ARM_PROTECTION', 'SENDING');
+    alarmAudio.playTone('CHIRP');
+    try {
+      await api.armAsset(assetId);
+      await refreshData();
+      trackCommand('ARM_PROTECTION', 'SENT', 'ARM command sent to ESP32');
+    } catch (err: any) {
+      trackCommand('ARM_PROTECTION', 'FAILED', err.message);
+    }
+  };
 
-    return () => clearInterval(simInterval);
-  }, [isTestMode, deviceId, device?.is_armed]);
+  const disarmAsset = async (assetId: string) => {
+    trackCommand('DISARM_PROTECTION', 'SENDING');
+    alarmAudio.playTone('CHIRP');
+    alarmAudio.stopLoudSiren();
+    try {
+      await api.disarmAsset(assetId);
+      await refreshData();
+      trackCommand('DISARM_PROTECTION', 'SENT', 'DISARM command sent to ESP32');
+    } catch (err: any) {
+      trackCommand('DISARM_PROTECTION', 'FAILED', err.message);
+    }
+  };
 
-  // Independent Security Controls
+  const armProtection = async () => {
+    if (activeAsset) {
+      await armAsset(activeAsset.id);
+    } else {
+      await turnOnBelongingSecurity();
+    }
+  };
+
+  const disarmProtection = async () => {
+    if (activeAsset) {
+      await disarmAsset(activeAsset.id);
+    } else {
+      await turnOffBelongingSecurity();
+    }
+  };
+
+  const stopSiren = async () => {
+    trackCommand('STOP_SIREN', 'SENDING');
+    alarmAudio.stopLoudSiren();
+    alarmAudio.playTone('CHIRP');
+    try {
+      await api.stopSiren(deviceId);
+      if (activeAlert) {
+        await api.acknowledgeAlert(activeAlert.id);
+        setActiveAlert(null);
+      }
+      await refreshData();
+      trackCommand('STOP_SIREN', 'ACKNOWLEDGED', 'Physical siren and web alarm silenced');
+    } catch (err: any) {
+      trackCommand('STOP_SIREN', 'FAILED', err.message);
+    }
+  };
+
   const turnOnAreaSecurity = async () => {
     trackCommand('ARM_AREA_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
-    if (isTestMode) {
-      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 1 } : null));
-    }
-    try {
-      await api.armAreaSecurity(deviceId);
-      trackCommand('ARM_AREA_SECURITY', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('ARM_AREA_SECURITY', 'FAILED', e.message);
-    }
+    setSettings((prev) => (prev ? { ...prev, area_security_enabled: 1 } : null));
+    await api.armAreaSecurity(deviceId);
+    await refreshData();
   };
 
   const turnOffAreaSecurity = async () => {
     trackCommand('DISARM_AREA_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
-    if (isTestMode) {
-      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 0 } : null));
-    }
-    try {
-      await api.disarmAreaSecurity(deviceId);
-      trackCommand('DISARM_AREA_SECURITY', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('DISARM_AREA_SECURITY', 'FAILED', e.message);
-    }
+    alarmAudio.stopLoudSiren();
+    setSettings((prev) => (prev ? { ...prev, area_security_enabled: 0 } : null));
+    await api.disarmAreaSecurity(deviceId);
+    await refreshData();
   };
 
   const turnOnBelongingSecurity = async () => {
-    trackCommand('ARM_PERSONAL_SECURITY', 'SENDING');
+    trackCommand('ARM_BELONGING_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
-    if (isTestMode) {
-      setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 1 } : null));
-    }
-    try {
-      await api.armPersonalSecurity(deviceId);
-      trackCommand('ARM_PERSONAL_SECURITY', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('ARM_PERSONAL_SECURITY', 'FAILED', e.message);
-    }
+    setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 1 } : null));
+    await api.armPersonalSecurity(deviceId);
+    await refreshData();
   };
 
   const turnOffBelongingSecurity = async () => {
-    trackCommand('DISARM_PERSONAL_SECURITY', 'SENDING');
+    trackCommand('DISARM_BELONGING_SECURITY', 'SENDING');
     alarmAudio.playTone('CHIRP');
-    if (isTestMode) {
-      setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 0 } : null));
-    }
-    try {
-      await api.disarmPersonalSecurity(deviceId);
-      trackCommand('DISARM_PERSONAL_SECURITY', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('DISARM_PERSONAL_SECURITY', 'FAILED', e.message);
-    }
-  };
-
-  // 4 Security Modes Engine
-  const setSecurityMode = async (mode: SecurityModeType) => {
-    trackCommand(`SET_MODE_${mode}`, 'SENDING');
-    alarmAudio.playTone('CHIRP');
-
-    let areaOn = 0;
-    let belongingOn = 0;
-
-    switch (mode) {
-      case 'HOME':
-        areaOn = 1;
-        belongingOn = 0;
-        break;
-      case 'AWAY':
-        areaOn = 1;
-        belongingOn = 1;
-        break;
-      case 'TRAVEL':
-        areaOn = 0;
-        belongingOn = 1;
-        break;
-      case 'EMERGENCY':
-        areaOn = 1;
-        belongingOn = 1;
-        alarmAudio.startLoudSiren();
-        break;
-      default:
-        break;
-    }
-
-    if (isTestMode) {
-      setSettings((prev) =>
-        prev
-          ? {
-              ...prev,
-              security_mode: mode,
-              area_security_enabled: areaOn,
-              belonging_security_enabled: belongingOn,
-            }
-          : null
-      );
-      setDevice((prev) => (prev ? { ...prev, is_armed: areaOn || belongingOn ? 1 : 0 } : null));
-    }
-
-    try {
-      await api.setSecurityMode(deviceId, mode);
-      await api.updateDeviceSettings(deviceId, {
-        security_mode: mode,
-        area_security_enabled: areaOn,
-        belonging_security_enabled: belongingOn,
-      });
-      trackCommand(`SET_MODE_${mode}`, 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand(`SET_MODE_${mode}`, 'FAILED', e.message);
-    }
+    alarmAudio.stopLoudSiren();
+    setSettings((prev) => (prev ? { ...prev, belonging_security_enabled: 0 } : null));
+    await api.disarmPersonalSecurity(deviceId);
+    await refreshData();
   };
 
   const updateCustomNames = async (areaName: string, belongingName: string) => {
-    const res = await api.updateDeviceSettings(deviceId, {
-      area_name: areaName,
-      belonging_name: belongingName,
-    });
-    setSettings(res.data);
+    setSettings((prev) => (prev ? { ...prev, area_name: areaName, belonging_name: belongingName } : null));
+    await api.updateDeviceSettings(deviceId, { area_name: areaName, belonging_name: belongingName });
+    await refreshData();
   };
 
   const armSystem = async () => {
-    trackCommand('ARM', 'SENDING');
-    alarmAudio.playTone('CHIRP');
-    if (isTestMode) {
-      setDevice((prev) => (prev ? { ...prev, is_armed: 1 } : null));
-      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 1, belonging_security_enabled: 1 } : null));
-    }
-    try {
-      await api.sendCommand(deviceId, 'ARM');
-      trackCommand('ARM', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('ARM', 'FAILED', e.message);
-    }
+    await armProtection();
   };
 
   const disarmSystem = async () => {
-    trackCommand('DISARM', 'SENDING');
-    alarmAudio.playTone('CHIRP');
-    alarmAudio.stopLoudSiren();
-    if (isTestMode) {
-      setDevice((prev) => (prev ? { ...prev, is_armed: 0 } : null));
-      setSettings((prev) => (prev ? { ...prev, area_security_enabled: 0, belonging_security_enabled: 0 } : null));
-    }
-    try {
-      await api.sendCommand(deviceId, 'DISARM');
-      trackCommand('DISARM', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('DISARM', 'FAILED', e.message);
-    }
+    await disarmProtection();
   };
 
   const activateBuzzer = async () => {
-    trackCommand('BUZZER_ON', 'SENDING');
+    trackCommand('ACTIVATE_BUZZER', 'SENDING');
     alarmAudio.startLoudSiren();
-    try {
-      await api.turnBuzzerOn(deviceId);
-      trackCommand('BUZZER_ON', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('BUZZER_ON', 'FAILED', e.message);
-    }
+    await api.turnBuzzerOn(deviceId);
+    await refreshData();
   };
 
   const stopBuzzer = async () => {
-    trackCommand('BUZZER_OFF', 'SENDING');
-    alarmAudio.stopLoudSiren();
-    alarmAudio.playTone('CHIRP');
-    try {
-      await api.turnBuzzerOff(deviceId);
-      setActiveAlert(null);
-      trackCommand('BUZZER_OFF', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('BUZZER_OFF', 'FAILED', e.message);
-    }
+    await stopSiren();
   };
 
   const toggleSilentMode = async () => {
-    alarmAudio.playTone('CHIRP');
-    const currentVal = settings?.silent_mode ?? 0;
-    const newVal = currentVal === 1 ? 0 : 1;
-    if (newVal === 1) {
+    const newSilent = settings?.silent_mode === 1 ? 0 : 1;
+    setSettings((prev) => (prev ? { ...prev, silent_mode: newSilent } : null));
+    if (newSilent === 1) {
       alarmAudio.stopLoudSiren();
     }
-    trackCommand(`SET_SILENT_MODE_${newVal ? 'ON' : 'OFF'}`, 'SENDING');
-    const res = await api.updateDeviceSettings(deviceId, { silent_mode: newVal });
-    setSettings(res.data);
-    trackCommand(`SET_SILENT_MODE_${newVal ? 'ON' : 'OFF'}`, 'SENT');
+    await api.updateDeviceSettings(deviceId, { silent_mode: newSilent });
+    await refreshData();
   };
 
   const requestGPSUpdate = async () => {
     trackCommand('REQUEST_GPS', 'SENDING');
+    await api.requestGPS(deviceId);
+  };
+
+  const setSecurityMode = async (mode: SecurityModeType) => {
+    trackCommand(`SET_MODE_${mode}`, 'SENDING');
     alarmAudio.playTone('CHIRP');
-    try {
-      await api.requestGPS(deviceId);
-      trackCommand('REQUEST_GPS', 'SENT');
-      await refreshData();
-    } catch (e: any) {
-      trackCommand('REQUEST_GPS', 'FAILED', e.message);
-    }
+    await api.setSecurityMode(deviceId, mode);
+    await refreshData();
   };
 
   const setSensitivityPreset = async (preset: 'LOW' | 'MEDIUM' | 'HIGH') => {
-    let th = 0.30;
-    if (preset === 'LOW') th = 0.55;
-    if (preset === 'MEDIUM') th = 0.30;
-    if (preset === 'HIGH') th = 0.15;
-    await api.updateDeviceSettings(deviceId, { movement_threshold: th, sensitivity_preset: preset });
-    setSettings((prev) => (prev ? { ...prev, movement_threshold: th, sensitivity_preset: preset } : null));
+    const threshold = preset === 'LOW' ? 0.55 : preset === 'HIGH' ? 0.15 : 0.30;
+    await setMovementThreshold(threshold);
   };
 
   const setMovementThreshold = async (threshold: number) => {
-    await api.updateDeviceSettings(deviceId, { movement_threshold: threshold });
     setSettings((prev) => (prev ? { ...prev, movement_threshold: threshold } : null));
+    await api.updateDeviceSettings(deviceId, { movement_threshold: threshold });
   };
 
   const setAlarmDuration = async (durationSec: number) => {
-    await api.updateDeviceSettings(deviceId, { alarm_duration_sec: durationSec });
     setSettings((prev) => (prev ? { ...prev, alarm_duration_sec: durationSec } : null));
+    await api.updateDeviceSettings(deviceId, { alarm_duration_sec: durationSec });
   };
 
   const updateSettings = async (updates: Partial<DeviceSettings>) => {
-    const res = await api.updateDeviceSettings(deviceId, updates);
-    setSettings(res.data);
+    setSettings((prev) => (prev ? { ...prev, ...updates } : null));
+    await api.updateDeviceSettings(deviceId, updates);
+    await refreshData();
   };
 
   const acknowledgeAlert = async (alertId: string) => {
     alarmAudio.stopLoudSiren();
     await api.acknowledgeAlert(alertId);
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === alertId ? { ...a, acknowledged: 1 } : a))
-    );
-    if (activeAlert?.id === alertId) {
-      setActiveAlert(null);
-    }
+    setActiveAlert(null);
+    await refreshData();
   };
 
   const resolveAlert = async (alertId: string) => {
     alarmAudio.stopLoudSiren();
     await api.resolveAlert(alertId);
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === alertId ? { ...a, acknowledged: 1, resolved: 1 } : a))
-    );
-    if (activeAlert?.id === alertId) {
-      setActiveAlert(null);
-    }
+    setActiveAlert(null);
+    await refreshData();
   };
 
   const clearAlerts = async () => {
@@ -1022,58 +899,34 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const triggerTestAlert = async (type: 'MOTION' | 'INTRUSION') => {
-    await api.triggerSimulationAlert({
-      device_id: deviceId,
-      alert_type: type,
-      title: type === 'MOTION' ? '🚨 [TEST] Belonging Movement' : '🚨 [TEST] Area Intrusion',
-      description:
-        type === 'MOTION'
-          ? 'Simulated personal belonging displacement detected via MPU6050.'
-          : 'Simulated human perimeter intrusion detected via HC-SR501 PIR.',
-      severity: type === 'MOTION' ? 'HIGH' : 'CRITICAL',
-    });
+    alarmAudio.startLoudSiren();
     await refreshData();
   };
-
-  const isEsp32Connected = isTestMode ? true : device?.is_online === 1 && lastHeartbeatAgeSec < 15;
-  const isAreaActive = settings?.area_security_enabled === 1 || telemetry?.area_security_enabled === true;
-  const isBelongingActive = settings?.belonging_security_enabled === 1 || telemetry?.belonging_security_enabled === true;
 
   // Determine current active security mode
   let currentSecurityMode: SecurityModeType = settings?.security_mode || 'CUSTOM';
   if (isAreaActive && isBelongingActive) {
-    if (telemetry?.buzzer_active) {
-      currentSecurityMode = 'EMERGENCY';
-    } else {
-      currentSecurityMode = 'AWAY';
-    }
+    currentSecurityMode = telemetry?.buzzer_active ? 'EMERGENCY' : 'AWAY';
   } else if (isAreaActive && !isBelongingActive) {
     currentSecurityMode = 'HOME';
   } else if (!isAreaActive && isBelongingActive) {
     currentSecurityMode = 'TRAVEL';
   }
 
-  // Sensor health status calculations & timeout detection
-  const isMpuOk = isTestMode || (isEsp32Connected && (Date.now() - lastMpuTimeRef.current) < 20000);
-  const isPirOk = settings?.pir_enabled !== 0;
-  const isGpsOk = telemetry?.gps?.valid === true;
-
-  // Security Score calculation
-  let calculatedScore = 100;
-  if (!isEsp32Connected && !isTestMode) calculatedScore -= 40;
-  if (!isAreaActive && !isBelongingActive) calculatedScore -= 15;
-  const unackedCritAlerts = alerts.filter((a) => a.acknowledged === 0 && (a.severity === 'CRITICAL' || a.severity === 'HIGH')).length;
-  calculatedScore -= Math.min(30, unackedCritAlerts * 15);
-  if (!isGpsOk) calculatedScore -= 5;
-  if (calculatedScore < 0) calculatedScore = 0;
+  // Real Sensor Health Status
+  const isMpuOk = isEsp32Connected && (Date.now() - lastMpuTimeRef.current) < 20000;
+  const isPirOk = isEsp32Connected && settings?.pir_enabled !== 0;
+  const isGpsOk = isEsp32Connected && telemetry?.gps?.valid === true;
 
   const sensorHealth: SensorHealthStatus = {
-    mpu: isMpuOk ? 'OPERATIONAL' : 'TIMEOUT',
-    pir: isPirOk ? (isEsp32Connected ? 'OPERATIONAL' : 'TIMEOUT') : 'DISABLED',
-    gps: isGpsOk ? 'LOCKED' : 'SEARCHING',
+    mpu: isMpuOk ? 'OPERATIONAL' : 'ERROR',
+    pir: isPirOk ? 'OPERATIONAL' : 'DISABLED',
+    gps: isGpsOk ? 'LOCKED' : isEsp32Connected ? 'SEARCHING' : 'UNAVAILABLE',
     buzzer: isEsp32Connected ? 'OPERATIONAL' : 'ERROR',
-    overallScore: calculatedScore,
+    overallScore: isEsp32Connected ? 100 : 0,
   };
+
+  const securityScore = isArmed ? (isEsp32Connected ? 100 : 45) : 30;
 
   return (
     <DeviceContext.Provider
@@ -1085,6 +938,8 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isTestMode,
         setTestMode,
         device,
+        assets,
+        activeAsset,
         settings,
         telemetry,
         alerts,
@@ -1093,16 +948,23 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setActiveAlert,
         routeHistory,
         currentSecurityMode,
-        securityScore: calculatedScore,
+        securityScore,
         sensorHealth,
         isAreaActive,
         isBelongingActive,
+        isArmed,
         isSocketConnected,
         isEsp32Connected,
         lastHeartbeatAgeSec,
         serverLatencyMs,
         latestCommandStatus,
         commandHistory,
+        pairDeviceAsset,
+        armAsset,
+        disarmAsset,
+        armProtection,
+        disarmProtection,
+        stopSiren,
         setSecurityMode,
         turnOnAreaSecurity,
         turnOffAreaSecurity,
@@ -1133,7 +995,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 };
 
 export const useDevice = () => {
-  const ctx = useContext(DeviceContext);
-  if (!ctx) throw new Error('useDevice must be used within a DeviceProvider');
-  return ctx;
+  const context = useContext(DeviceContext);
+  if (!context) {
+    throw new Error('useDevice must be used within a DeviceProvider');
+  }
+  return context;
 };

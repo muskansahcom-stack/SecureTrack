@@ -1,16 +1,16 @@
 import mqtt, { MqttClient } from 'mqtt';
 import { CONFIG } from '../config/index.js';
-import { Telemetry, Alert, DeviceCommand } from '../types/index.js';
+import { Telemetry, SecurityEvent, DeviceCommandType } from '../types/index.js';
 import {
   recordTelemetry,
-  createAlert,
-  logEvent,
-  upsertDevice,
+  recordSecurityEvent,
+  getProtectedAssetByDeviceId,
   getDeviceSettings,
   updateAreaSecurityState,
   updateBelongingSecurityState,
   updateDeviceArmedStatus,
   updateDeviceOnlineStatus,
+  registerOrUpdateDevice,
 } from '../database/db.js';
 import { emitTelemetry, emitAlert, emitDeviceStatus, emitCommandAck } from '../websocket/socket.js';
 import { registerBrokerMessageHandler, publishToBroker } from './broker.js';
@@ -24,13 +24,25 @@ export function initMqttClient(): Promise<void> {
       try {
         const messageStr = messageBuffer.toString();
         const parts = topic.split('/');
-        // Format: iot/security/{deviceId}/{type}
-        if (parts.length < 4) return;
-        const deviceId = parts[2];
-        const messageType = parts[3];
+        
+        let deviceId = '';
+        let messageType = '';
 
-        if (messageType === 'command') {
-          // Skip commands in ingestion handler so they aren't processed as incoming sensor readings
+        // Standard format: securebelong/device/{deviceId}/{type}
+        if (parts[0] === 'securebelong' && parts[1] === 'device' && parts.length >= 4) {
+          deviceId = parts[2];
+          messageType = parts[3];
+        } 
+        // Legacy format: iot/security/{deviceId}/{type}
+        else if (parts[0] === 'iot' && parts[1] === 'security' && parts.length >= 4) {
+          deviceId = parts[2];
+          messageType = parts[3];
+        } else {
+          return;
+        }
+
+        if (messageType === 'commands' || messageType === 'command') {
+          // Skip commands in ingestion handler
           return;
         }
 
@@ -53,14 +65,26 @@ export function initMqttClient(): Promise<void> {
 
       externalClient.on('connect', () => {
         console.log('[MQTT Client] Connected to external broker');
+        externalClient?.subscribe('securebelong/device/+/+');
         externalClient?.subscribe('iot/security/+/+');
       });
 
       externalClient.on('message', (topic, payload) => {
         try {
           const parts = topic.split('/');
-          if (parts.length >= 4 && parts[3] !== 'command') {
-            handleIncomingMessage(parts[2], parts[3], JSON.parse(payload.toString()));
+          let deviceId = '';
+          let messageType = '';
+
+          if (parts[0] === 'securebelong' && parts[1] === 'device' && parts.length >= 4) {
+            deviceId = parts[2];
+            messageType = parts[3];
+          } else if (parts[0] === 'iot' && parts[1] === 'security' && parts.length >= 4) {
+            deviceId = parts[2];
+            messageType = parts[3];
+          }
+
+          if (deviceId && messageType && messageType !== 'commands' && messageType !== 'command') {
+            handleIncomingMessage(deviceId, messageType, JSON.parse(payload.toString()));
           }
         } catch (e) {}
       });
@@ -70,16 +94,19 @@ export function initMqttClient(): Promise<void> {
   });
 }
 
-export function publishCommand(deviceId: string, command: DeviceCommand): boolean {
-  const topic = `iot/security/${deviceId}/command`;
+export function publishCommand(deviceId: string, command: { command: string; params?: any }): boolean {
+  const standardTopic = `securebelong/device/${deviceId}/commands`;
+  const legacyTopic = `iot/security/${deviceId}/command`;
   const payloadStr = JSON.stringify(command);
 
-  // Publish to embedded Aedes broker
-  publishToBroker(topic, payloadStr);
+  // Publish to embedded Aedes broker on both standard and legacy topics
+  publishToBroker(standardTopic, payloadStr);
+  publishToBroker(legacyTopic, payloadStr);
 
   // Also publish to external broker if connected
   if (externalClient && externalClient.connected) {
-    externalClient.publish(topic, payloadStr, { qos: 1 });
+    externalClient.publish(standardTopic, payloadStr, { qos: 1 });
+    externalClient.publish(legacyTopic, payloadStr, { qos: 1 });
   }
 
   return true;
@@ -88,12 +115,12 @@ export function publishCommand(deviceId: string, command: DeviceCommand): boolea
 export function handleIncomingMessage(deviceId: string, type: string, payload: any) {
   const now = new Date().toISOString();
 
-  upsertDevice({
-    device_id: deviceId,
-    is_online: 1,
-    last_seen: now,
-    wifi_rssi: payload.wifi_rssi || 0,
-    firmware_version: payload.fw_ver || 'v1.0.0',
+  registerOrUpdateDevice({
+    device_uid: deviceId,
+    status: 'ONLINE',
+    wifi_rssi: payload.wifi_rssi,
+    firmware_version: payload.fw_ver || payload.firmware_version || 'v1.0.0-PRO',
+    ip_address: payload.ip,
   });
 
   switch (type) {
@@ -108,14 +135,14 @@ export function handleIncomingMessage(deviceId: string, type: string, payload: a
 
       const telemetry: Telemetry = {
         device_id: deviceId,
-        timestamp: payload.timestamp ? new Date(payload.timestamp).toISOString() : now,
+        timestamp: payload.timestamp ? (typeof payload.timestamp === 'number' ? new Date(payload.timestamp).toISOString() : payload.timestamp) : now,
         mpu: {
-          accel_x: Number(payload.mpu?.accel_x ?? payload.ax ?? 0),
-          accel_y: Number(payload.mpu?.accel_y ?? payload.ay ?? 0),
-          accel_z: Number(payload.mpu?.accel_z ?? payload.az ?? 0),
-          gyro_x: Number(payload.mpu?.gyro_x ?? payload.gx ?? 0),
-          gyro_y: Number(payload.mpu?.gyro_y ?? payload.gy ?? 0),
-          gyro_z: Number(payload.mpu?.gyro_z ?? payload.gz ?? 0),
+          accel_x: Number(payload.mpu?.accel_x ?? payload.ax ?? payload.accelerometer_x ?? 0),
+          accel_y: Number(payload.mpu?.accel_y ?? payload.ay ?? payload.accelerometer_y ?? 0),
+          accel_z: Number(payload.mpu?.accel_z ?? payload.az ?? payload.accelerometer_z ?? 0),
+          gyro_x: Number(payload.mpu?.gyro_x ?? payload.gx ?? payload.gyro_x ?? 0),
+          gyro_y: Number(payload.mpu?.gyro_y ?? payload.gy ?? payload.gyro_y ?? 0),
+          gyro_z: Number(payload.mpu?.gyro_z ?? payload.gz ?? payload.gyro_z ?? 0),
           magnitude: Number(payload.mpu?.magnitude ?? payload.mag ?? 0),
           motion_detected: Boolean(payload.mpu?.motion_detected ?? payload.motion ?? false),
         },
@@ -124,8 +151,8 @@ export function handleIncomingMessage(deviceId: string, type: string, payload: a
           raw_val: Number(payload.pir?.raw_val ?? payload.pir_raw ?? 0),
         },
         gps: {
-          latitude: payload.gps?.latitude ?? payload.gps?.lat ?? payload.lat ?? null,
-          longitude: payload.gps?.longitude ?? payload.gps?.lng ?? payload.lng ?? null,
+          latitude: payload.gps?.latitude ?? payload.gps?.lat ?? payload.lat ?? payload.latitude ?? null,
+          longitude: payload.gps?.longitude ?? payload.gps?.lng ?? payload.lng ?? payload.longitude ?? null,
           valid: Boolean(payload.gps?.valid ?? payload.gps_valid ?? false),
           satellites: Number(payload.gps?.satellites ?? payload.sats ?? 0),
           altitude: payload.gps?.altitude ?? payload.alt,
@@ -138,6 +165,7 @@ export function handleIncomingMessage(deviceId: string, type: string, payload: a
         free_heap: payload.free_heap,
         uptime_sec: payload.uptime_sec,
         wifi_rssi: payload.wifi_rssi,
+        battery: payload.battery,
       };
 
       recordTelemetry(telemetry);
@@ -145,54 +173,77 @@ export function handleIncomingMessage(deviceId: string, type: string, payload: a
       break;
     }
 
+    case 'events':
     case 'alerts': {
-      const isArea = payload.alert_type === 'INTRUSION' || payload.security_mode === 'AREA';
-      const alert: Alert = {
-        id: payload.id || `alt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      const asset = getProtectedAssetByDeviceId(deviceId);
+      const assetName = asset?.asset_name || 'Protected Asset';
+      const eventType = payload.event_type || payload.alert_type || 'MOTION_DETECTED';
+
+      let title = payload.title;
+      let message = payload.message || payload.description;
+
+      if (!title) {
+        if (eventType === 'MOTION_DETECTED') {
+          title = `🚨 Unexpected movement on ${assetName}`;
+          message = message || `MPU6050 detected abnormal displacement on ${assetName}`;
+        } else if (eventType === 'PIR_INTRUSION') {
+          title = `🚨 Area Intrusion Detected`;
+          message = message || `HC-SR501 PIR sensor triggered perimeter breach in protected area`;
+        } else if (eventType === 'ALARM_STARTED') {
+          title = `🔊 Siren Activated on ${assetName}`;
+          message = message || `Physical buzzer & police siren activated on device ${deviceId}`;
+        } else if (eventType === 'ALARM_STOPPED') {
+          title = `🔕 Siren Silenced`;
+          message = message || `Physical alarm stopped on device ${deviceId}`;
+        } else if (eventType === 'DEVICE_ONLINE') {
+          title = `● Hardware Connected`;
+          message = message || `ESP32 (${deviceId}) connected to SecureBelong Gateway`;
+        } else {
+          title = `Security Event: ${eventType}`;
+          message = message || `Event triggered on device ${deviceId}`;
+        }
+      }
+
+      const secEvent: SecurityEvent = {
+        id: payload.id || `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         device_id: deviceId,
-        user_id: payload.user_id || 'usr_muskan',
-        security_mode: isArea ? 'AREA' : 'BELONGING',
-        alert_type: payload.alert_type || (isArea ? 'INTRUSION' : 'MOTION'),
-        title: payload.title || (isArea ? '🚨 Area Intrusion Detected' : '🚨 Personal Belonging Moved'),
-        description: payload.description || (isArea ? 'PIR sensor triggered area intrusion.' : 'MPU6050 detected belonging movement.'),
-        severity: payload.severity || (isArea ? 'CRITICAL' : 'HIGH'),
-        timestamp: payload.timestamp ? new Date(payload.timestamp).toISOString() : now,
-        latitude: payload.latitude || payload.lat || null,
-        longitude: payload.longitude || payload.lng || null,
+        asset_id: asset?.id || payload.asset_id,
+        user_id: asset?.user_id || payload.user_id || 'usr_muskan',
+        event_type: eventType,
+        title,
+        message,
+        severity: payload.severity || (eventType === 'MOTION_DETECTED' || eventType === 'PIR_INTRUSION' ? 'CRITICAL' : 'HIGH'),
+        latitude: payload.latitude ?? payload.lat ?? null,
+        longitude: payload.longitude ?? payload.lng ?? null,
+        alarm_status: payload.alarm_status || (eventType === 'MOTION_DETECTED' || eventType === 'PIR_INTRUSION' || eventType === 'ALARM_STARTED' ? 'ACTIVE' : 'STOPPED'),
+        created_at: payload.timestamp ? (typeof payload.timestamp === 'number' ? new Date(payload.timestamp).toISOString() : payload.timestamp) : now,
         acknowledged: 0,
       };
 
-      createAlert(alert);
-      emitAlert(alert);
-
-      logEvent({
-        id: `evt_alt_${Date.now()}`,
+      recordSecurityEvent(secEvent);
+      
+      // Emit both real-time alert and event
+      emitAlert({
+        id: secEvent.id,
         device_id: deviceId,
-        user_id: alert.user_id,
-        security_mode: alert.security_mode,
-        event_type: alert.alert_type,
-        sensor: isArea ? 'PIR' : 'MPU6050',
-        message: alert.description,
-        severity: alert.severity,
-        timestamp: alert.timestamp,
-        data_payload: JSON.stringify({ lat: alert.latitude, lng: alert.longitude }),
+        asset_id: secEvent.asset_id,
+        user_id: secEvent.user_id || 'usr_muskan',
+        alert_type: eventType,
+        title: secEvent.title || title,
+        description: secEvent.message || message,
+        severity: secEvent.severity,
+        timestamp: secEvent.created_at,
+        latitude: secEvent.latitude || null,
+        longitude: secEvent.longitude || null,
+        acknowledged: 0,
       });
       break;
     }
 
     case 'status': {
-      const hasArea = payload.area_security !== undefined || payload.area_armed !== undefined;
-      const hasBelonging = payload.belonging_security !== undefined || payload.belonging_armed !== undefined;
-
-      if (hasArea) {
-        updateAreaSecurityState(deviceId, Boolean(payload.area_security ?? payload.area_armed));
-      }
-      if (hasBelonging) {
-        updateBelongingSecurityState(deviceId, Boolean(payload.belonging_security ?? payload.belonging_armed));
-      }
-
       const isArmed = payload.armed !== undefined ? Boolean(payload.armed) : Boolean(payload.is_armed);
       updateDeviceArmedStatus(deviceId, isArmed);
+      updateDeviceOnlineStatus(deviceId, true, payload.ip, payload.wifi_rssi, payload.fw_ver);
 
       emitDeviceStatus({
         device_id: deviceId,
@@ -206,7 +257,7 @@ export function handleIncomingMessage(deviceId: string, type: string, payload: a
     }
 
     case 'heartbeat': {
-      updateDeviceOnlineStatus(deviceId, true);
+      updateDeviceOnlineStatus(deviceId, true, undefined, payload.wifi_rssi);
       emitDeviceStatus({
         device_id: deviceId,
         is_online: 1,
@@ -218,13 +269,9 @@ export function handleIncomingMessage(deviceId: string, type: string, payload: a
 
     case 'ack': {
       const cmd = String(payload.command || '').toUpperCase();
-      if (cmd === 'AREA_SECURITY_ON' || cmd === 'AREA_SECURITY_ENABLED') {
-        updateAreaSecurityState(deviceId, true);
-      } else if (cmd === 'AREA_SECURITY_OFF' || cmd === 'AREA_SECURITY_DISABLED') {
-        updateAreaSecurityState(deviceId, false);
-      } else if (cmd === 'BELONGING_SECURITY_ON' || cmd === 'BELONGING_SECURITY_ENABLED') {
+      if (cmd === 'ARM' || cmd === 'ARM_PROTECTION' || cmd === 'BELONGING_SECURITY_ON') {
         updateBelongingSecurityState(deviceId, true);
-      } else if (cmd === 'BELONGING_SECURITY_OFF' || cmd === 'BELONGING_SECURITY_DISABLED') {
+      } else if (cmd === 'DISARM' || cmd === 'DISARM_PROTECTION' || cmd === 'BELONGING_SECURITY_OFF') {
         updateBelongingSecurityState(deviceId, false);
       }
 

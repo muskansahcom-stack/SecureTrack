@@ -7,38 +7,102 @@ export interface User {
   created_at: string;
 }
 
+export type DeviceStatusType = 'ONLINE' | 'OFFLINE' | 'UNPAIRED';
+
 export interface Device {
   id: string;
-  device_id: string; // e.g. "ESP32-SECURITY-001"
+  device_uid: string; // e.g. "ESP32-SECURITY-001"
+  device_id?: string; // compatibility alias
+  device_model: string; // e.g. "ESP32 DevKit V1"
   device_name: string;
-  user_id: string;
-  is_online: number; // 0 or 1
-  is_armed: number; // 0 or 1
+  user_id?: string;
+  status: DeviceStatusType; // "ONLINE" | "OFFLINE" | "UNPAIRED"
+  is_online?: number; // 0 or 1
+  is_armed?: number; // 0 or 1
   last_seen: string;
   ip_address?: string;
   firmware_version?: string;
   wifi_rssi?: number;
+  battery_level?: number;
   created_at: string;
+}
+
+export type AssetType = 'LAPTOP' | 'BACKPACK' | 'LUGGAGE' | 'VEHICLE' | 'OTHER';
+export type ProtectionModeType = 'PERSONAL_BELONGING' | 'AREA_SECURITY' | 'COMBINED';
+
+export interface ProtectedAsset {
+  id: string;
+  user_id: string;
+  device_id: string; // foreign key to devices.device_uid
+  asset_name: string; // e.g. "My Laptop"
+  asset_type: AssetType; // e.g. "LAPTOP"
+  protection_mode: ProtectionModeType; // e.g. "PERSONAL_BELONGING"
+  armed: boolean | number; // true/1 or false/0
+  created_at: string;
+}
+
+export interface SensorReading {
+  id?: number;
+  device_id: string;
+  accelerometer_x: number;
+  accelerometer_y: number;
+  accelerometer_z: number;
+  gyro_x: number;
+  gyro_y: number;
+  gyro_z: number;
+  latitude: number | null;
+  longitude: number | null;
+  wifi_rssi: number | null;
+  battery: number | null;
+  timestamp: string;
+}
+
+export type SecurityEventType =
+  | 'MOTION_DETECTED'
+  | 'PIR_INTRUSION'
+  | 'DEVICE_ONLINE'
+  | 'DEVICE_OFFLINE'
+  | 'GPS_UPDATED'
+  | 'ALARM_STARTED'
+  | 'ALARM_STOPPED';
+
+export type EventSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+export type AlarmStatus = 'ACTIVE' | 'STOPPED' | 'CLEARED' | 'IDLE';
+
+export interface SecurityEvent {
+  id: string;
+  device_id: string;
+  asset_id?: string | null;
+  user_id?: string | null;
+  event_type: SecurityEventType | string;
+  title?: string;
+  message?: string;
+  severity: EventSeverity;
+  latitude?: number | null;
+  longitude?: number | null;
+  alarm_status: AlarmStatus | string;
+  created_at: string;
+  acknowledged?: number;
 }
 
 export interface DeviceSettings {
   device_id: string;
-  area_name: string; // e.g. "Hostel Room", "Bedroom", "Office"
-  area_security_enabled: number; // 1 = Area PIR Monitoring Active, 0 = OFF
-  belonging_name: string; // e.g. "Laptop Bag", "Backpack", "Suitcase"
-  belonging_security_enabled: number; // 1 = Belonging MPU6050 Motion Monitoring Active, 0 = OFF
+  area_name: string;
+  area_security_enabled: number;
+  belonging_name: string;
+  belonging_security_enabled: number;
   security_mode?: string;
   movement_threshold: number; // in g, default 0.30
   sensitivity_preset?: string;
-  pir_enabled: number; // 1 or 0
-  mpu_enabled: number; // 1 or 0
-  auto_buzzer: number; // 1 or 0
-  silent_mode: number; // 1 or 0 (Covert anti-theft mode: phone alerts only, hardware silent)
-  alarm_duration_sec: number; // default 15
-  notification_motion: number; // 1 or 0
-  notification_intrusion: number; // 1 or 0
-  notification_offline: number; // 1 or 0
-  notification_gps: number; // 1 or 0
+  pir_enabled: number;
+  mpu_enabled: number;
+  auto_buzzer: number;
+  silent_mode: number;
+  alarm_duration_sec: number;
+  notification_motion: number;
+  notification_intrusion: number;
+  notification_offline: number;
+  notification_gps: number;
 }
 
 export interface GPSPoint {
@@ -56,7 +120,7 @@ export interface MPUData {
   gyro_x: number;
   gyro_y: number;
   gyro_z: number;
-  magnitude: number; // Delta magnitude in g
+  magnitude: number;
   motion_detected: boolean;
 }
 
@@ -86,65 +150,45 @@ export interface Telemetry {
   free_heap?: number;
   uptime_sec?: number;
   wifi_rssi?: number;
+  battery?: number;
 }
 
 export interface Alert {
   id: string;
   device_id: string;
+  asset_id?: string | null;
   user_id?: string;
   security_mode?: 'AREA' | 'BELONGING' | 'SYSTEM';
-  alert_type: 'MOTION' | 'INTRUSION' | 'GPS_LOST' | 'DEVICE_OFFLINE' | 'DEVICE_ONLINE' | 'ARMED' | 'DISARMED' | 'ALARM_STOPPED';
+  alert_type: string;
   title: string;
   description: string;
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
   timestamp: string;
   latitude: number | null;
   longitude: number | null;
-  acknowledged: number; // 0 or 1
+  acknowledged: number;
   resolved?: number;
 }
 
 export interface EventLog {
   id: string;
   device_id: string;
+  asset_id?: string | null;
   user_id?: string;
   security_mode?: 'AREA' | 'BELONGING' | 'SYSTEM';
   event_type: string;
   sensor: 'MPU6050' | 'PIR' | 'GPS' | 'BUZZER' | 'SYSTEM' | 'NETWORK';
   message: string;
-  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'INFO';
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
   timestamp: string;
   data_payload?: string;
 }
 
-export type DeviceCommandType = 
-  | 'AREA_SECURITY_ON'
-  | 'AREA_SECURITY_OFF'
-  | 'BELONGING_SECURITY_ON'
-  | 'BELONGING_SECURITY_OFF'
-  | 'SET_MODE_HOME'
-  | 'SET_MODE_AWAY'
-  | 'SET_MODE_TRAVEL'
-  | 'SET_MODE_EMERGENCY'
-  | 'REQUEST_GPS'
+export type DeviceCommandType =
   | 'ARM'
   | 'DISARM'
-  | 'BUZZER_ON'
-  | 'BUZZER_OFF'
-  | 'SET_THRESHOLD'
-  | 'SET_SILENT_MODE'
-  | 'ENABLE_PIR'
-  | 'DISABLE_PIR'
-  | 'ENABLE_MPU'
-  | 'DISABLE_MPU'
-  | 'GET_STATUS'
-  | 'RESET_ALERT'
-  | 'REBOOT'
-  | string;
+  | 'STOP_SIREN'
+  | 'REQUEST_STATUS'
+  | 'SET_CONFIG';
 
-export interface DeviceCommand {
-  command: DeviceCommandType;
-  params?: Record<string, any>;
-  timestamp: number;
-  sender?: string;
-}
+export type SecurityModeType = 'HOME' | 'AWAY' | 'NIGHT' | 'TRAVEL' | 'CUSTOM' | 'EMERGENCY';

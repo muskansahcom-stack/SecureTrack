@@ -57,7 +57,7 @@ const MainApp: React.FC = () => {
       <TestModeBanner />
 
       {/* Floating High Priority Alert Banner */}
-      <AlertBanner />
+      <AlertBanner onNavigateToLocation={() => setCurrentTab('location')} />
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-md w-full mx-auto p-4 pt-3">

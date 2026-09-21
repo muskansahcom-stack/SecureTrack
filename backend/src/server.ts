@@ -7,7 +7,6 @@ import { initWebSocket } from './websocket/socket.js';
 import { startEmbeddedBroker } from './mqtt/broker.js';
 import { initMqttClient } from './mqtt/client.js';
 import { startHeartbeatMonitor } from './services/heartbeat.service.js';
-import { startInProcessSimulator } from './services/esp32Simulator.service.js';
 
 import { authRouter } from './routes/auth.routes.js';
 import { deviceRouter } from './routes/device.routes.js';
@@ -53,10 +52,7 @@ async function bootstrap() {
     // 2. Start MQTT Subscriber Client
     await initMqttClient();
 
-    // 3. Start In-Process Hardware Simulator (Streams live feeds for testing)
-    startInProcessSimulator();
-
-    // 4. Start Heartbeat Monitor for hardware disconnection detection
+    // 3. Start Heartbeat Monitor for hardware disconnection detection
     startHeartbeatMonitor();
 
     // 4. Start HTTP & WebSocket Server

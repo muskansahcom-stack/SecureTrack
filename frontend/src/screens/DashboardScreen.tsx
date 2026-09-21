@@ -41,6 +41,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setCurrentTab 
   const { user } = useAuth();
   const {
     device,
+    assets,
+    activeAsset,
     settings,
     telemetry,
     alerts,
@@ -58,6 +60,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setCurrentTab 
     turnOffAreaSecurity,
     turnOnBelongingSecurity,
     turnOffBelongingSecurity,
+    armProtection,
+    disarmProtection,
+    stopSiren,
     updateCustomNames,
     activateBuzzer,
     stopBuzzer,
@@ -423,12 +428,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setCurrentTab 
                 <div className={`p-2.5 rounded-xl border ${
                   isBelongingActive ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-gray-800 text-gray-400 border-gray-700'
                 }`}>
-                  <Activity className="w-5 h-5" />
+                  <Briefcase className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">
-                    PERSONAL BELONGING
-                  </span>
+                  <div className="flex items-center space-x-1.5">
+                    <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
+                      PERSONAL BELONGING
+                    </span>
+                    <span className="text-[9px] font-mono text-gray-400 bg-gray-800/80 px-1.5 py-0.2 rounded border border-gray-700">
+                      {device?.device_id || 'ESP32-SECURITY-001'}
+                    </span>
+                  </div>
                   <h4 className="text-base font-black text-white">{belongingName}</h4>
                 </div>
               </div>
@@ -440,58 +450,93 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setCurrentTab 
                     : 'bg-gray-800/80 text-gray-400 border-gray-700'
                 }`}>
                   <span className={`w-2 h-2 rounded-full ${isBelongingActive ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'}`} />
-                  <span>{isBelongingActive ? 'PROTECTED' : 'DISARMED'}</span>
+                  <span>{isBelongingActive ? 'ARMED' : 'DISARMED'}</span>
                 </span>
               </div>
             </div>
 
-            {/* Belonging Telemetry Snapshot */}
-            {isBelongingActive && mpuMotion ? (
-              <div className="mt-4 p-3 rounded-2xl bg-amber-950/60 border border-amber-500/50 space-y-2 text-xs">
+            {/* Real Hardware Status Matrix */}
+            <div className="grid grid-cols-2 gap-2 mt-3.5 p-2.5 rounded-2xl bg-black/40 border border-gray-800 text-[11px] font-mono">
+              <div className="flex items-center justify-between p-1.5 rounded-xl bg-gray-900/60 border border-gray-800/80">
+                <span className="text-gray-400 text-[10px]">Motion (MPU):</span>
+                <span className={`font-bold ${
+                  !isEsp32Connected
+                    ? 'text-gray-500'
+                    : mpuMotion
+                    ? 'text-rose-400 animate-pulse'
+                    : isBelongingActive
+                    ? 'text-emerald-400'
+                    : 'text-gray-400'
+                }`}>
+                  {!isEsp32Connected ? 'OFFLINE' : mpuMotion ? 'TRIGGERED ⚠️' : isBelongingActive ? 'ACTIVE' : 'STANDBY'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between p-1.5 rounded-xl bg-gray-900/60 border border-gray-800/80">
+                <span className="text-gray-400 text-[10px]">GPS Module:</span>
+                <span className={`font-bold ${
+                  !isEsp32Connected
+                    ? 'text-gray-500'
+                    : gpsValid
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                }`}>
+                  {!isEsp32Connected ? 'OFFLINE' : gpsValid ? 'FIXED ●' : 'SEARCHING'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between p-1.5 rounded-xl bg-gray-900/60 border border-gray-800/80">
+                <span className="text-gray-400 text-[10px]">Physical Siren:</span>
+                <span className={`font-bold ${
+                  isBuzzerSounding
+                    ? 'text-rose-400 animate-pulse'
+                    : 'text-emerald-400'
+                }`}>
+                  {isBuzzerSounding ? 'ACTIVE 🚨' : 'READY'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between p-1.5 rounded-xl bg-gray-900/60 border border-gray-800/80">
+                <span className="text-gray-400 text-[10px]">Wi-Fi Link:</span>
+                <span className={`font-bold ${
+                  isEsp32Connected
+                    ? 'text-emerald-400'
+                    : 'text-rose-400'
+                }`}>
+                  {isEsp32Connected ? 'CONNECTED' : 'OFFLINE'}
+                </span>
+              </div>
+            </div>
+
+            {/* Belonging Telemetry Alert Snapshot if movement is detected */}
+            {isBelongingActive && mpuMotion && (
+              <div className="mt-3 p-3 rounded-2xl bg-amber-950/60 border border-amber-500/50 space-y-1.5 text-xs">
                 <div className="flex items-center justify-between text-amber-200 font-bold">
                   <span className="flex items-center space-x-1">
                     <AlertTriangle className="w-4 h-4 text-amber-400 animate-bounce" />
-                    <span>🚨 BELONGING MOVEMENT DETECTED</span>
-                  </span>
-                  <span className="font-mono text-white text-[11px]">
-                    {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    <span>🚨 MOVEMENT DETECTED ON {belongingName.toUpperCase()}</span>
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px] pt-1 border-t border-amber-500/30">
                   <div>
-                    <span className="text-gray-400 block">Movement Intensity:</span>
-                    <span className="font-bold text-amber-300">
-                      {telemetry?.mpu?.intensity || 'HIGH'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block">Acceleration Delta:</span>
+                    <span className="text-gray-400 block">Acceleration:</span>
                     <span className="font-mono font-bold text-white">
-                      {telemetry?.mpu?.magnitude ? `${telemetry.mpu.magnitude.toFixed(2)} g` : '2.84 g'}
+                      {telemetry?.mpu?.magnitude ? `${telemetry.mpu.magnitude.toFixed(2)} g` : 'Detected'}
                     </span>
                   </div>
                   <div>
-                    <span className="text-gray-400 block">Alarm State:</span>
+                    <span className="text-gray-400 block">Local Alarm:</span>
                     <span className="font-bold text-rose-400">
-                      {telemetry?.buzzer_active ? '🔴 ACTIVE' : 'STANDBY'}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-400 block">GPS Status:</span>
-                    <span className="font-bold text-blue-400">
-                      {gpsValid ? '● FIXED' : 'SEARCHING'}
+                      {telemetry?.buzzer_active ? '🔴 SOUNDING' : 'READY'}
                     </span>
                   </div>
                 </div>
               </div>
-            ) : (
-              <p className="text-xs text-gray-400 mt-3 leading-relaxed">
-                Sensor: <strong className="text-indigo-300">MPU6050 6-DOF IMU</strong>. {isBelongingActive ? 'Movement & tilt monitoring is active.' : 'Disarmed. Tap below to arm protection.'}
-              </p>
             )}
           </div>
 
-          <div className="mt-4 pt-2">
+          {/* Action Control Panel */}
+          <div className="mt-4 pt-2 space-y-2">
             <button
               onClick={handleToggleBelonging}
               disabled={isTogglingBelonging || (!isEsp32Connected && !isTestMode)}
@@ -504,21 +549,47 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({ setCurrentTab 
               }`}
             >
               {!isEsp32Connected && !isTestMode ? (
-                <span>DEVICE UNAVAILABLE (OFFLINE)</span>
+                <span>REAL HARDWARE NOT CONNECTED</span>
               ) : isTogglingBelonging ? (
                 <span>SENDING COMMAND TO ESP32...</span>
               ) : isBelongingActive ? (
                 <>
                   <ShieldOff className="w-4 h-4" />
-                  <span>DISARM BELONGING</span>
+                  <span>DISARM PROTECTION</span>
                 </>
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4" />
-                  <span>ARM PERSONAL BELONGING</span>
+                  <span>ARM PROTECTION</span>
                 </>
               )}
             </button>
+
+            {/* Quick Action Sub-buttons */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setCurrentTab('location')}
+                className="py-2.5 px-3 rounded-xl bg-gray-950 hover:bg-gray-800 border border-gray-800 text-gray-300 hover:text-white font-bold text-[11px] flex items-center justify-center space-x-1.5 transition"
+              >
+                <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                <span>VIEW LIVE LOCATION</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  stopSiren();
+                  stopBuzzer();
+                }}
+                className={`py-2.5 px-3 rounded-xl border font-bold text-[11px] flex items-center justify-center space-x-1.5 transition ${
+                  isBuzzerSounding
+                    ? 'bg-rose-600 text-white border-rose-400 animate-pulse'
+                    : 'bg-gray-950 hover:bg-gray-800 border-gray-800 text-gray-300 hover:text-white'
+                }`}
+              >
+                <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+                <span>STOP SIREN</span>
+              </button>
+            </div>
           </div>
         </div>
 

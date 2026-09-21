@@ -7,6 +7,7 @@
 // 1. DEVICE IDENTIFICATION
 // ==========================================
 #define DEVICE_ID           "ESP32-SECURITY-001"
+#define DEVICE_MODEL        "ESP32 DevKit V1"
 #define FIRMWARE_VERSION    "v1.0.0-PRO"
 
 // ==========================================
@@ -23,19 +24,21 @@
 // 3. MQTT BROKER CONFIGURATION
 // Machine IP running SECUREBELONG Gateway (:1883)
 // ==========================================
-#define MQTT_SERVER         "10.10.14.175"         // Current Local IP of this machine
+#define MQTT_SERVER         "10.10.21.132"        // Current Local IP of this machine
 #define MQTT_PORT           1883
 #define MQTT_USER           ""                     // Leave empty if no auth
 #define MQTT_PASSWORD       ""
 #define DEFAULT_SILENT_MODE false                  // False = Audible buzzer, True = Covert silent tracking
 
-// MQTT TOPICS
-#define TOPIC_TELEMETRY     "iot/security/" DEVICE_ID "/telemetry"
-#define TOPIC_ALERTS        "iot/security/" DEVICE_ID "/alerts"
-#define TOPIC_STATUS        "iot/security/" DEVICE_ID "/status"
-#define TOPIC_HEARTBEAT     "iot/security/" DEVICE_ID "/heartbeat"
-#define TOPIC_COMMAND       "iot/security/" DEVICE_ID "/command"
-#define TOPIC_ACK           "iot/security/" DEVICE_ID "/ack"
+// STANDARD SECUREBELONG MQTT TOPICS
+#define TOPIC_TELEMETRY     "securebelong/device/" DEVICE_ID "/telemetry"
+#define TOPIC_EVENTS        "securebelong/device/" DEVICE_ID "/events"
+#define TOPIC_COMMANDS      "securebelong/device/" DEVICE_ID "/commands"
+#define TOPIC_STATUS        "securebelong/device/" DEVICE_ID "/status"
+#define TOPIC_ACK           "securebelong/device/" DEVICE_ID "/ack"
+
+// Legacy topic compatibility
+#define TOPIC_LEGACY_CMD    "iot/security/" DEVICE_ID "/command"
 
 // ==========================================
 // 4. HARDWARE PIN DEFINITIONS (ESP32 DevKit V1)
@@ -62,10 +65,11 @@
 // 5. OPERATIONAL THRESHOLDS & TIMINGS
 // ==========================================
 #define DEFAULT_MOVEMENT_THRESHOLD    0.30f  // Movement threshold in 'g' (delta from 1.0g)
+#define MPU_CONFIRM_SAMPLES           3      // Multi-sample window to prevent noise false positives
 #define TELEMETRY_INTERVAL_MS         1000   // Send sensor updates every 1 second
 #define HEARTBEAT_INTERVAL_MS         5000   // Heartbeat ping every 5 seconds
 #define PIR_COOLDOWN_MS               3000   // Prevent alert spam from repeated PIR triggers
-#define MPU_COOLDOWN_MS               3000   // Prevent alert spam from continuous motion
+#define MPU_COOLDOWN_MS               2500   // Cooldown between repeated motion events
 #define DEFAULT_ALARM_DURATION_MS     15000  // Buzzer automatic shutoff after 15s
 
 #endif // CONFIG_H

@@ -13,21 +13,24 @@ export function startHeartbeatMonitor() {
       const now = Date.now();
 
       for (const dev of devices) {
+        const devId = dev.device_id || dev.device_uid || dev.id;
+        if (!devId) continue;
+
         if (dev.is_online === 1) {
           const lastSeenTime = new Date(dev.last_seen).getTime();
           const elapsed = now - lastSeenTime;
 
           if (elapsed > CONFIG.HEARTBEAT_TIMEOUT_MS) {
-            console.log(`[Heartbeat Monitor] Device ${dev.device_id} timed out (${Math.round(elapsed / 1000)}s since last communication). Marking OFFLINE.`);
-            updateDeviceOnlineStatus(dev.device_id, false);
+            console.log(`[Heartbeat Monitor] Device ${devId} timed out (${Math.round(elapsed / 1000)}s since last communication). Marking OFFLINE.`);
+            updateDeviceOnlineStatus(devId, false);
             emitDeviceStatus({
-              device_id: dev.device_id,
+              device_id: devId,
               is_online: 0
             });
 
             logEvent({
               id: `evt_timeout_${Date.now()}`,
-              device_id: dev.device_id,
+              device_id: devId,
               event_type: 'DEVICE_OFFLINE',
               sensor: 'NETWORK',
               message: `ESP32 connection lost. No heartbeat for ${Math.round(elapsed / 1000)} seconds.`,

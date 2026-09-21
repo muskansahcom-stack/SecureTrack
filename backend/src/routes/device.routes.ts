@@ -2,10 +2,15 @@ import { Router, Request, Response } from 'express';
 import {
   getDevice,
   getAllDevices,
-  upsertDevice,
+  registerOrUpdateDevice,
+  pairDeviceAsset,
+  getProtectedAssets,
+  getProtectedAssetById,
+  updateAssetArmStatus,
   getLatestTelemetry,
   getTelemetryHistory,
   getGPSRouteHistory,
+  getSecurityEvents,
   getEvents,
   clearEvents,
   getDeviceSettings,
@@ -13,46 +18,83 @@ import {
   updateAreaSecurityState,
   updateBelongingSecurityState,
   updateDeviceArmedStatus,
+  recordSecurityEvent,
   logEvent
 } from '../database/db.js';
 import { publishCommand } from '../mqtt/client.js';
-import { emitDeviceStatus, emitCommandAck } from '../websocket/socket.js';
-import { DeviceCommand } from '../types/index.js';
+import { emitDeviceStatus, emitCommandAck, emitAssetUpdate } from '../websocket/socket.js';
 
 export const deviceRouter = Router();
 
-// Register or pair device
+// ============================================================================
+// REAL ASSET & DEVICE PAIRING
+// ============================================================================
+deviceRouter.post('/pair', (req: Request, res: Response): any => {
+  try {
+    const { device_id, device_uid, user_id, asset_name, asset_type, protection_mode } = req.body;
+    const targetUid = String(device_uid || device_id || 'ESP32-SECURITY-001');
+    const targetUser = String(user_id || 'usr_muskan');
+    const targetAsset = String(asset_name || 'My Laptop');
+
+    const asset = pairDeviceAsset({
+      user_id: targetUser,
+      device_id: targetUid,
+      asset_name: targetAsset,
+      asset_type: asset_type || 'LAPTOP',
+      protection_mode: protection_mode || 'PERSONAL_BELONGING'
+    });
+
+    const device = getDevice(targetUid);
+
+    recordSecurityEvent({
+      id: `evt_pair_${Date.now()}`,
+      device_id: targetUid,
+      asset_id: asset.id,
+      user_id: targetUser,
+      event_type: 'DEVICE_ONLINE',
+      title: `Device Paired: ${targetUid}`,
+      message: `Paired with protected asset [${targetAsset}].`,
+      severity: 'INFO',
+      alarm_status: 'IDLE',
+      created_at: new Date().toISOString()
+    });
+
+    emitAssetUpdate(asset);
+
+    return res.status(200).json({ success: true, asset, device });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Register device (legacy alias)
 deviceRouter.post('/register', (req: Request, res: Response): any => {
   try {
-    const { device_id, device_name, user_id, area_name, belonging_name } = req.body;
-    if (!device_id) {
-      return res.status(400).json({ error: 'device_id is required' });
-    }
+    const { device_id, device_uid, device_name, user_id, area_name, belonging_name } = req.body;
+    const targetUid = String(device_uid || device_id || 'ESP32-SECURITY-001');
 
-    const device = upsertDevice({
-      device_id: String(device_id),
-      device_name: device_name ? String(device_name) : `Device ${device_id}`,
+    const device = registerOrUpdateDevice({
+      device_uid: targetUid,
+      device_name: device_name ? String(device_name) : `Security Unit (${targetUid})`,
       user_id: user_id ? String(user_id) : 'usr_muskan'
     });
 
     if (area_name || belonging_name) {
-      updateDeviceSettings(String(device_id), {
+      updateDeviceSettings(targetUid, {
         ...(area_name ? { area_name: String(area_name) } : {}),
         ...(belonging_name ? { belonging_name: String(belonging_name) } : {})
       });
     }
 
-    logEvent({
-      id: `evt_reg_${Date.now()}`,
-      device_id: String(device_id),
-      user_id: user_id ? String(user_id) : 'usr_muskan',
-      security_mode: 'SYSTEM',
-      event_type: 'DEVICE_REGISTERED',
-      sensor: 'SYSTEM',
-      message: `Device ${device_id} successfully paired with account.`,
-      severity: 'INFO',
-      timestamp: new Date().toISOString()
-    });
+    if (belonging_name) {
+      pairDeviceAsset({
+        user_id: user_id ? String(user_id) : 'usr_muskan',
+        device_id: targetUid,
+        asset_name: String(belonging_name),
+        asset_type: 'LAPTOP',
+        protection_mode: 'PERSONAL_BELONGING'
+      });
+    }
 
     return res.status(200).json({ success: true, device });
   } catch (err: any) {
@@ -60,14 +102,88 @@ deviceRouter.post('/register', (req: Request, res: Response): any => {
   }
 });
 
-// List all devices for user
+// ============================================================================
+// PROTECTED ASSETS
+// ============================================================================
+deviceRouter.get('/assets', (req: Request, res: Response) => {
+  const userId = req.query.userId as string | undefined;
+  const assets = getProtectedAssets(userId);
+  return res.json(assets);
+});
+
+deviceRouter.post('/assets/:id/arm', (req: Request, res: Response): any => {
+  const assetId = req.params.id as string;
+  const asset = updateAssetArmStatus(assetId, true);
+  if (!asset) {
+    return res.status(404).json({ error: 'Asset not found' });
+  }
+
+  // Publish real MQTT ARM command
+  publishCommand(asset.device_id, {
+    command: 'ARM',
+    params: { asset_id: asset.id, mode: asset.protection_mode },
+  });
+
+  emitDeviceStatus({ device_id: asset.device_id, is_armed: 1 });
+  emitAssetUpdate(asset);
+
+  recordSecurityEvent({
+    id: `evt_arm_${Date.now()}`,
+    device_id: asset.device_id,
+    asset_id: asset.id,
+    user_id: asset.user_id,
+    event_type: 'ALARM_STARTED',
+    title: `🛡️ Protection Armed: ${asset.asset_name}`,
+    message: `Personal belonging protection armed. MPU6050 vibration tripwire active.`,
+    severity: 'INFO',
+    alarm_status: 'IDLE',
+    created_at: new Date().toISOString()
+  });
+
+  return res.json({ success: true, asset });
+});
+
+deviceRouter.post('/assets/:id/disarm', (req: Request, res: Response): any => {
+  const assetId = req.params.id as string;
+  const asset = updateAssetArmStatus(assetId, false);
+  if (!asset) {
+    return res.status(404).json({ error: 'Asset not found' });
+  }
+
+  // Publish real MQTT DISARM command
+  publishCommand(asset.device_id, {
+    command: 'DISARM',
+    params: { asset_id: asset.id },
+  });
+
+  emitDeviceStatus({ device_id: asset.device_id, is_armed: 0 });
+  emitAssetUpdate(asset);
+
+  recordSecurityEvent({
+    id: `evt_disarm_${Date.now()}`,
+    device_id: asset.device_id,
+    asset_id: asset.id,
+    user_id: asset.user_id,
+    event_type: 'ALARM_STOPPED',
+    title: `Protection Disarmed: ${asset.asset_name}`,
+    message: `Personal belonging protection disarmed for ${asset.asset_name}.`,
+    severity: 'INFO',
+    alarm_status: 'IDLE',
+    created_at: new Date().toISOString()
+  });
+
+  return res.json({ success: true, asset });
+});
+
+// ============================================================================
+// DEVICE STATUS & TELEMETRY
+// ============================================================================
 deviceRouter.get('/list', (req: Request, res: Response) => {
   const userId = req.query.userId as string | undefined;
   const devices = getAllDevices(userId);
   return res.json(devices);
 });
 
-// Get device status
 deviceRouter.get('/:id/status', (req: Request, res: Response): any => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const device = getDevice(id);
@@ -76,15 +192,16 @@ deviceRouter.get('/:id/status', (req: Request, res: Response): any => {
   }
   const settings = getDeviceSettings(id);
   const latestTelemetry = getLatestTelemetry(id);
+  const asset = getProtectedAssets().find(a => a.device_id === id);
 
   return res.json({
     device,
     settings,
-    latestTelemetry
+    latestTelemetry,
+    asset
   });
 });
 
-// Get latest telemetry
 deviceRouter.get('/:id/telemetry', (req: Request, res: Response): any => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const telemetry = getLatestTelemetry(id);
@@ -94,7 +211,6 @@ deviceRouter.get('/:id/telemetry', (req: Request, res: Response): any => {
   return res.json(telemetry);
 });
 
-// Get telemetry history
 deviceRouter.get('/:id/telemetry/history', (req: Request, res: Response) => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const limit = parseInt((req.query.limit as string) || '50', 10);
@@ -102,7 +218,6 @@ deviceRouter.get('/:id/telemetry/history', (req: Request, res: Response) => {
   return res.json(history);
 });
 
-// Get GPS route history (breadcrumbs for live tracking)
 deviceRouter.get('/:id/route', (req: Request, res: Response) => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const limit = parseInt((req.query.limit as string) || '100', 10);
@@ -110,17 +225,15 @@ deviceRouter.get('/:id/route', (req: Request, res: Response) => {
   return res.json(route);
 });
 
-// Get event logs
+// Real Security Events
 deviceRouter.get('/:id/events', (req: Request, res: Response) => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const limit = parseInt((req.query.limit as string) || '100', 10);
-  const eventType = req.query.type as string | undefined;
   const userId = req.query.userId as string | undefined;
-  const events = getEvents(id, userId, limit, eventType);
+  const events = getSecurityEvents(id, userId, limit);
   return res.json(events);
 });
 
-// Clear events
 deviceRouter.delete('/:id/events', (req: Request, res: Response) => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const userId = req.query.userId as string | undefined;
@@ -128,14 +241,12 @@ deviceRouter.delete('/:id/events', (req: Request, res: Response) => {
   return res.json({ success: true, message: 'Events cleared' });
 });
 
-// Get device settings
 deviceRouter.get('/:id/settings', (req: Request, res: Response) => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const settings = getDeviceSettings(id);
   return res.json(settings);
 });
 
-// Update device settings
 deviceRouter.put('/:id/settings', (req: Request, res: Response) => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const updates = req.body;
@@ -143,50 +254,24 @@ deviceRouter.put('/:id/settings', (req: Request, res: Response) => {
 
   if (updates.movement_threshold !== undefined) {
     publishCommand(id, {
-      command: 'SET_THRESHOLD',
+      command: 'SET_CONFIG',
       params: { threshold: updates.movement_threshold },
-      timestamp: Date.now()
     });
   }
 
   if (updates.silent_mode !== undefined) {
     publishCommand(id, {
-      command: 'SET_SILENT_MODE',
+      command: 'SET_CONFIG',
       params: { silent_mode: updates.silent_mode },
-      timestamp: Date.now()
     });
   }
-
-  if (updates.area_security_enabled !== undefined) {
-    publishCommand(id, {
-      command: updates.area_security_enabled ? 'AREA_SECURITY_ON' : 'AREA_SECURITY_OFF',
-      timestamp: Date.now()
-    });
-  }
-
-  if (updates.belonging_security_enabled !== undefined) {
-    publishCommand(id, {
-      command: updates.belonging_security_enabled ? 'BELONGING_SECURITY_ON' : 'BELONGING_SECURITY_OFF',
-      timestamp: Date.now()
-    });
-  }
-
-  logEvent({
-    id: `evt_set_${Date.now()}`,
-    device_id: id,
-    user_id: updates.user_id || 'usr_muskan',
-    security_mode: 'SYSTEM',
-    event_type: 'SETTINGS_UPDATE',
-    sensor: 'SYSTEM',
-    message: `Security settings configured for ${id}`,
-    severity: 'INFO',
-    timestamp: new Date().toISOString()
-  });
 
   return res.json(updated);
 });
 
-// Send command to ESP32
+// ============================================================================
+// HARDWARE COMMAND DISPATCH
+// ============================================================================
 deviceRouter.post('/:id/command', (req: Request, res: Response): any => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -196,227 +281,29 @@ deviceRouter.post('/:id/command', (req: Request, res: Response): any => {
       return res.status(400).json({ error: 'Command is required' });
     }
 
-    const devCommand: DeviceCommand = {
-      command,
-      params: params || {},
-      timestamp: Date.now(),
-      sender: 'WEB_APP'
-    };
-
     const targetUser = userId || 'usr_muskan';
 
-    // 1. AREA SECURITY COMMANDS (HC-SR501 PIR)
-    if (command === 'AREA_SECURITY_ON') {
-      const updatedSettings = updateAreaSecurityState(id, true);
-      emitDeviceStatus({ device_id: id, is_armed: 1 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'AREA',
-        event_type: 'AREA_SECURITY_ARMED',
-        sensor: 'PIR',
-        message: `Area security armed for [${updatedSettings.area_name}]. PIR tripwire active.`,
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    } else if (command === 'AREA_SECURITY_OFF') {
-      const updatedSettings = updateAreaSecurityState(id, false);
-      const isStillArmed = updatedSettings.belonging_security_enabled === 1;
-      emitDeviceStatus({ device_id: id, is_armed: isStillArmed ? 1 : 0 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'AREA',
-        event_type: 'AREA_SECURITY_DISARMED',
-        sensor: 'PIR',
-        message: `Area security disarmed for [${updatedSettings.area_name}].`,
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // 2. PERSONAL BELONGING SECURITY COMMANDS (MPU6050)
-    else if (command === 'BELONGING_SECURITY_ON') {
-      const updatedSettings = updateBelongingSecurityState(id, true);
-      emitDeviceStatus({ device_id: id, is_armed: 1 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'BELONGING',
-        event_type: 'BELONGING_SECURITY_ARMED',
-        sensor: 'MPU6050',
-        message: `Personal belonging security armed for [${updatedSettings.belonging_name}]. MPU6050 vibration tripwire active.`,
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    } else if (command === 'BELONGING_SECURITY_OFF') {
-      const updatedSettings = updateBelongingSecurityState(id, false);
-      const isStillArmed = updatedSettings.area_security_enabled === 1;
-      emitDeviceStatus({ device_id: id, is_armed: isStillArmed ? 1 : 0 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'BELONGING',
-        event_type: 'BELONGING_SECURITY_DISARMED',
-        sensor: 'MPU6050',
-        message: `Personal belonging security disarmed for [${updatedSettings.belonging_name}].`,
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // 3. 4 SECURITY MODES COMMANDS
-    else if (command === 'SET_MODE_HOME') {
-      updateAreaSecurityState(id, true);
-      updateBelongingSecurityState(id, false);
-      updateDeviceSettings(id, { security_mode: 'HOME' });
-      emitDeviceStatus({ device_id: id, is_armed: 1 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'SYSTEM',
-        event_type: 'SECURITY_MODE_HOME',
-        sensor: 'SYSTEM',
-        message: 'Security Mode switched to HOME (Area: ON, Belonging: OFF).',
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    } else if (command === 'SET_MODE_AWAY') {
-      updateAreaSecurityState(id, true);
-      updateBelongingSecurityState(id, true);
-      updateDeviceSettings(id, { security_mode: 'AWAY' });
-      emitDeviceStatus({ device_id: id, is_armed: 1 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'SYSTEM',
-        event_type: 'SECURITY_MODE_AWAY',
-        sensor: 'SYSTEM',
-        message: 'Security Mode switched to AWAY (Area: ON, Belonging: ON).',
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    } else if (command === 'SET_MODE_TRAVEL') {
-      updateAreaSecurityState(id, false);
-      updateBelongingSecurityState(id, true);
-      updateDeviceSettings(id, { security_mode: 'TRAVEL' });
-      emitDeviceStatus({ device_id: id, is_armed: 1 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'SYSTEM',
-        event_type: 'SECURITY_MODE_TRAVEL',
-        sensor: 'GPS',
-        message: 'Security Mode switched to TRAVEL (Belonging: ON, GPS: ON).',
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    } else if (command === 'SET_MODE_EMERGENCY') {
-      updateAreaSecurityState(id, true);
-      updateBelongingSecurityState(id, true);
-      updateDeviceSettings(id, { security_mode: 'EMERGENCY' });
-      emitDeviceStatus({ device_id: id, is_armed: 1 });
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'SYSTEM',
-        event_type: 'SECURITY_MODE_EMERGENCY',
-        sensor: 'BUZZER',
-        message: 'Security Mode switched to EMERGENCY (Maximum Acoustic Siren & GPS Lock).',
-        severity: 'CRITICAL',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // 4. PHYSICAL ALARM BUZZER COMMANDS
-    else if (command === 'BUZZER_OFF') {
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'SYSTEM',
-        event_type: 'ALARM_STOPPED',
-        sensor: 'BUZZER',
-        message: 'Physical alarm stopped by user from web dashboard.',
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    } else if (command === 'BUZZER_ON') {
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'SYSTEM',
-        event_type: 'ALARM_TRIGGERED',
-        sensor: 'BUZZER',
-        message: 'Manual alarm siren sounding via web application.',
-        severity: 'HIGH',
-        timestamp: new Date().toISOString()
-      });
-    } else if (command === 'REQUEST_GPS') {
-      logEvent({
-        id: `evt_cmd_${Date.now()}`,
-        device_id: id,
-        user_id: targetUser,
-        security_mode: 'SYSTEM',
-        event_type: 'REQUEST_GPS',
-        sensor: 'GPS',
-        message: 'GPS location fix requested from NEO-6M module.',
-        severity: 'INFO',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // 5. MASTER ARM / DISARM
-    else if (command === 'ARM') {
-      updateAreaSecurityState(id, true);
+    if (command === 'ARM' || command === 'ARM_PROTECTION' || command === 'BELONGING_SECURITY_ON') {
       updateBelongingSecurityState(id, true);
       emitDeviceStatus({ device_id: id, is_armed: 1 });
-    } else if (command === 'DISARM') {
-      updateAreaSecurityState(id, false);
+      publishCommand(id, { command: 'ARM', params: params || {} });
+    } else if (command === 'DISARM' || command === 'DISARM_PROTECTION' || command === 'BELONGING_SECURITY_OFF') {
       updateBelongingSecurityState(id, false);
       emitDeviceStatus({ device_id: id, is_armed: 0 });
+      publishCommand(id, { command: 'DISARM', params: params || {} });
+    } else if (command === 'STOP_SIREN') {
+      publishCommand(id, { command: 'STOP_SIREN', params: params || {} });
+    } else if (command === 'REQUEST_STATUS') {
+      publishCommand(id, { command: 'REQUEST_STATUS', params: params || {} });
+    } else {
+      publishCommand(id, { command, params: params || {} });
     }
 
-    // Dispatch to physical ESP32 over MQTT
-    const published = publishCommand(id, devCommand);
-
-    return res.json({
+    return res.status(200).json({
       success: true,
-      published,
-      command: devCommand,
-      message: `Command '${command}' dispatched to ESP32 (${id})`
+      message: `Command [${command}] published to ESP32 device ${id}.`,
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
-});
-
-// REST Heartbeat endpoint for direct HTTP fallback
-deviceRouter.post('/:id/heartbeat', (req: Request, res: Response) => {
-  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const now = new Date().toISOString();
-
-  upsertDevice({
-    device_id: id,
-    is_online: 1,
-    last_seen: now,
-    wifi_rssi: req.body.wifi_rssi || 0
-  });
-
-  emitDeviceStatus({
-    device_id: id,
-    is_online: 1,
-    last_seen: now
-  });
-
-  return res.json({ success: true, timestamp: now });
 });
