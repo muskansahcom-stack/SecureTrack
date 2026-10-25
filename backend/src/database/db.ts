@@ -59,8 +59,7 @@ export function initDatabase() {
       asset_type TEXT DEFAULT 'LAPTOP',
       protection_mode TEXT DEFAULT 'PERSONAL_BELONGING',
       armed INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (device_id) REFERENCES devices(device_uid) ON DELETE CASCADE
+      created_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS sensor_readings (
@@ -76,8 +75,7 @@ export function initDatabase() {
       longitude REAL,
       wifi_rssi INTEGER,
       battery REAL,
-      timestamp TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (device_id) REFERENCES devices(device_uid) ON DELETE CASCADE
+      timestamp TEXT DEFAULT (datetime('now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_sensor_readings_dev_time ON sensor_readings(device_id, timestamp DESC);
@@ -95,8 +93,7 @@ export function initDatabase() {
       longitude REAL,
       alarm_status TEXT DEFAULT 'ACTIVE',
       acknowledged INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (device_id) REFERENCES devices(device_uid) ON DELETE CASCADE
+      created_at TEXT DEFAULT (datetime('now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_security_events_dev_time ON security_events(device_id, created_at DESC);
@@ -116,8 +113,7 @@ export function initDatabase() {
       notification_motion INTEGER DEFAULT 1,
       notification_intrusion INTEGER DEFAULT 1,
       notification_offline INTEGER DEFAULT 1,
-      notification_gps INTEGER DEFAULT 1,
-      FOREIGN KEY (device_id) REFERENCES devices(device_uid) ON DELETE CASCADE
+      notification_gps INTEGER DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS telemetry (

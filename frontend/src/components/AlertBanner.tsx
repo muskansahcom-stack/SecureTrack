@@ -20,7 +20,7 @@ export const AlertBanner: React.FC<AlertBannerProps> = ({ onNavigateToLocation }
 
   return (
     <div className="fixed top-16 left-0 right-0 z-50 px-4 py-2 select-none">
-      <div className="max-w-md mx-auto bg-gradient-to-r from-rose-950/98 via-red-900/98 to-rose-950/98 border-2 border-rose-500 rounded-2xl shadow-2xl p-4 text-white backdrop-blur-md animate-pulse">
+      <div className="max-w-2xl mx-auto bg-gradient-to-r from-rose-950/98 via-red-900/98 to-rose-950/98 border-2 border-rose-500 rounded-2xl shadow-2xl p-4 text-white backdrop-blur-md animate-pulse">
         <div className="flex items-start space-x-3">
           <div className="p-2.5 rounded-xl bg-rose-600 text-white animate-bounce border border-rose-400 shadow-lg shadow-rose-600/50 flex-shrink-0">
             <AlertCircle className="w-6 h-6" />

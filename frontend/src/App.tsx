@@ -60,7 +60,7 @@ const MainApp: React.FC = () => {
       <AlertBanner onNavigateToLocation={() => setCurrentTab('location')} />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-md w-full mx-auto p-4 pt-3">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
         {currentTab === 'dashboard' && <DashboardScreen setCurrentTab={setCurrentTab} />}
         {currentTab === 'sensors' && <SensorsScreen />}
         {currentTab === 'location' && <LiveLocationScreen />}

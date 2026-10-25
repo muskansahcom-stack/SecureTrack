@@ -22,7 +22,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentTab, setCurrentTab 
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-[#0d1322]/95 backdrop-blur-lg border-t border-gray-800/80 px-2 py-1.5 pb-safe select-none">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0d1322]/95 backdrop-blur-lg border-t border-gray-800/80 px-2 py-1.5 pb-safe select-none">
       <div className="max-w-md mx-auto grid grid-cols-6 gap-1">
         {navItems.map((item) => {
           const Icon = item.icon;

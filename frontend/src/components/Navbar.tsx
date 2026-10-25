@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Wifi, WifiOff, Cpu, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Shield, Wifi, WifiOff, Cpu, RefreshCw, AlertTriangle, Activity, MapPin, Bell, Sliders } from 'lucide-react';
 import { useDevice } from '../context/DeviceContext.js';
 import { AppTab } from '../types/index.js';
 
@@ -8,9 +8,10 @@ interface NavbarProps {
   setCurrentTab: (tab: AppTab) => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ setCurrentTab }) => {
-  const { deviceId, device, isEsp32Connected, isTestMode, refreshData } = useDevice();
+export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab }) => {
+  const { deviceId, device, isEsp32Connected, isTestMode, refreshData, alerts } = useDevice();
   const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const unreadAlerts = alerts.filter((a) => a.acknowledged === 0).length;
 
   const isArmed = device?.is_armed === 1;
 
@@ -21,8 +22,8 @@ export const Navbar: React.FC<NavbarProps> = ({ setCurrentTab }) => {
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-[#070a12]/95 backdrop-blur-md border-b border-gray-800/80 px-4 py-2.5 select-none">
-      <div className="max-w-md mx-auto flex items-center justify-between">
+    <header className="sticky top-0 z-40 bg-[#070a12]/95 backdrop-blur-md border-b border-gray-800/80 px-4 sm:px-6 lg:px-8 py-2.5 select-none">
+      <div className="max-w-7xl mx-auto flex items-center justify-between">
         {/* Brand & Logo */}
         <div 
           className="flex items-center space-x-2.5 cursor-pointer"
@@ -45,6 +46,81 @@ export const Navbar: React.FC<NavbarProps> = ({ setCurrentTab }) => {
             <p className="text-[10px] text-gray-400 font-medium leading-none">IoT Security Gateway</p>
           </div>
         </div>
+
+        {/* Desktop Navigation Links */}
+        <nav className="hidden md:flex items-center space-x-1 lg:space-x-1.5">
+          <button
+            onClick={() => setCurrentTab('dashboard')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+              currentTab === 'dashboard'
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40 shadow-sm shadow-blue-500/10'
+                : 'text-gray-400 hover:text-white hover:bg-gray-900/80'
+            }`}
+          >
+            <Shield className="w-4 h-4" />
+            <span>Dashboard</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('sensors')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+              currentTab === 'sensors'
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40 shadow-sm shadow-blue-500/10'
+                : 'text-gray-400 hover:text-white hover:bg-gray-900/80'
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            <span>Live Sensors</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('location')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+              currentTab === 'location'
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40 shadow-sm shadow-blue-500/10'
+                : 'text-gray-400 hover:text-white hover:bg-gray-900/80'
+            }`}
+          >
+            <MapPin className="w-4 h-4" />
+            <span>GPS Tracking</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('alerts')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 relative ${
+              currentTab === 'alerts'
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40 shadow-sm shadow-blue-500/10'
+                : 'text-gray-400 hover:text-white hover:bg-gray-900/80'
+            }`}
+          >
+            <Bell className="w-4 h-4" />
+            <span>Alerts</span>
+            {unreadAlerts > 0 && (
+              <span className="bg-rose-500 text-white font-bold text-[9px] px-1.5 py-0.2 rounded-full ml-1 animate-pulse">
+                {unreadAlerts}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setCurrentTab('health')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+              currentTab === 'health'
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40 shadow-sm shadow-blue-500/10'
+                : 'text-gray-400 hover:text-white hover:bg-gray-900/80'
+            }`}
+          >
+            <Cpu className="w-4 h-4" />
+            <span>Hardware Health</span>
+          </button>
+          <button
+            onClick={() => setCurrentTab('settings')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 ${
+              currentTab === 'settings'
+                ? 'bg-blue-600/20 text-blue-400 border border-blue-500/40 shadow-sm shadow-blue-500/10'
+                : 'text-gray-400 hover:text-white hover:bg-gray-900/80'
+            }`}
+          >
+            <Sliders className="w-4 h-4" />
+            <span>Settings</span>
+          </button>
+        </nav>
 
         {/* Status Indicators & Quick Actions */}
         <div className="flex items-center space-x-2">
